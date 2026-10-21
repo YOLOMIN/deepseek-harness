@@ -1,0 +1,4 @@
+# 智能运维控制台原型叠加层：在 web 组合的浏览器插件表中追加 aiops 控制台。
+- insert:
+    - id: aiops-console
+      name: '@gac2/dsh-client-ui-aiops'
