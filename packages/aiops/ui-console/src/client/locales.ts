@@ -7,7 +7,7 @@ export const NS = 'aiops'
 export const zh = {
   'panel': '智能运维控制台',
   'title': '智能运维控制台',
-  'subtitle': '智能体 · RAG · skills · 日志 · 记忆 · MCP 统一管理（原型）',
+  'subtitle': '智能体 · RAG · skills · 日志 · 记忆 · MCP 统一管理（账号体系统一对接基础运维平台）',
 } as const
 
 /** English dictionary. */

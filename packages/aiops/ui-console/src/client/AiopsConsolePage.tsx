@@ -17,17 +17,18 @@ import {
 
 /* ---------- 主题变量 ---------- */
 const V = {
-  text: 'var(--dsw-alias-label-primary)',
-  text2: 'var(--dsw-alias-label-secondary)',
-  text3: 'var(--dsw-alias-label-tertiary)',
-  bg: 'var(--dsw-alias-bg-module-platform)',
-  border: 'var(--dsw-alias-border-l)',
-  brand: 'var(--dsw-alias-brand-primary)',
-  success: 'var(--dsw-alias-state-success-primary)',
-  warn: 'var(--dsw-alias-state-warn-label)',
-  error: 'var(--dsw-alias-state-error-primary)',
-  radius: 'var(--dsw-radius-md)',
-  mono: 'var(--dsw-font-mono)',
+  text: 'var(--dsw-alias-label-primary,#1f2328)',
+  text2: 'var(--dsw-alias-label-secondary,#4a5568)',
+  text3: 'var(--dsw-alias-label-tertiary,#8a94a6)',
+  bg: 'var(--dsw-alias-bg-module-platform,#ffffff)',
+  border: 'var(--dsw-alias-border-l,#e3e6ea)',
+  brand: 'var(--dsw-alias-brand-primary,#5b6ee1)',
+  onBrand: 'var(--dsw-alias-bg-module-platform,#ffffff)',
+  success: 'var(--dsw-alias-state-success-primary,#2ea44f)',
+  warn: 'var(--dsw-alias-state-warn-label,#b25e09)',
+  error: 'var(--dsw-alias-state-error-primary,#d73a49)',
+  radius: 'var(--dsw-radius-md,8px)',
+  mono: 'var(--dsw-font-mono,monospace)',
 } as const
 
 type Role = 'admin' | 'hpc' | 'os'
@@ -53,13 +54,13 @@ function Tag({ color, children }: { color: string; children: unknown }) {
   )
 }
 
-function Btn({ primary, onClick, children }: { primary?: boolean; onClick?: () => void; children: unknown }) {
+function Btn({ primary, danger, onClick, children }: { primary?: boolean; danger?: boolean; onClick?: () => void; children: unknown }) {
   return (
     <button onClick={onClick} style={{
       fontSize: 12, cursor: 'pointer', borderRadius: 6, padding: '3px 10px', whiteSpace: 'nowrap',
-      border: primary ? 'none' : `1px solid ${V.border}`,
+      border: primary ? 'none' : `1px solid ${danger ? V.error : V.border}`,
       background: primary ? V.brand : 'transparent',
-      color: primary ? '#ffffff' : V.text2,
+      color: primary ? V.onBrand : danger ? V.error : V.text2,
     }}>{children as never}</button>
   )
 }
@@ -161,11 +162,11 @@ function Note({ children }: { children: unknown }) {
   return <div style={{ fontSize: 12.5, color: V.text2, lineHeight: 1.8 }}>{children as never}</div>
 }
 
-/* ---------- 智能体管理（生命周期 + 会话关联 + 智能体间协作；按账户权限过滤） ---------- */
+/* ---------- 智能体管理（生命周期 + 会话关联；按账户权限过滤） ---------- */
 /** 智能体实例卡片：头像 + 职责 + 模型 + 上次活跃 + 最近会话摘要 + 打开会话入口。 */
 function AgentCard(props: {
   icon: string; iconColor: string; name: string; role: string; model: string;
-  lastActive: string; lastSession: string; sessions: number; running: boolean; source: string; highlight?: boolean;
+  lastActive: string; lastSession: string; sessions: number; source: string; highlight?: boolean;
   onOpen?: () => void
 }) {
   return (
@@ -182,7 +183,7 @@ function AgentCard(props: {
           <div style={{ fontSize: 14, fontWeight: 600, color: V.text }}>{props.name}</div>
           <div style={{ fontSize: 11.5, color: V.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{props.role}</div>
         </div>
-        <span style={{ marginLeft: 'auto' }}>{props.running ? <Tag color={V.success}>运行中</Tag> : <Tag color={V.warn}>已停止</Tag>}</span>
+        <span style={{ marginLeft: 'auto' }}><Tag color={V.success}>运行中</Tag></span>
       </div>
       <div style={{ fontSize: 11.5, color: V.text3, fontFamily: V.mono }}>{props.model}</div>
       <div style={{ fontSize: 12, color: V.text3 }}>上次活跃：{props.lastActive} · 会话 {props.sessions} 个</div>
@@ -193,7 +194,7 @@ function AgentCard(props: {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, borderTop: `1px solid ${V.border}`, paddingTop: 8 }}>
         <Btn primary onClick={props.onOpen}>打开会话</Btn>
         <Btn>配置</Btn>
-        <Btn>{props.running ? '停止' : '启动'}</Btn>
+        <Btn danger>销毁</Btn>
         <span style={{ marginLeft: 'auto', fontSize: 11.5, color: V.text3 }}>{props.source}</span>
       </div>
     </div>
@@ -237,23 +238,13 @@ function openAgentSession(agent: { name: string; icon: string; color: string }) 
 }
 
 function AgentsTab({ role }: { role: Role }) {
-  const [collab, setCollab] = useState(true)
   const agents = [
-    { key: 'hpc' as const, scope: 'hpc' as Scope, card: (
-      <AgentCard
-        icon="H" iconColor="#5b6ee1" name="HPC 智能体" role="调度诊断 · 对接 HPC 调度器"
-        model="deepseek-chat（私有化）" lastActive="10 分钟前" sessions={12}
-        lastSession="job-88213 作业排队超时：队列 gpu-normal 资源占满，建议…"
-        running source="对接：HPC 调度器（SLURM / PBS）" highlight
-        onOpen={() => openAgentSession({ name: 'HPC 智能体', icon: 'H', color: '#5b6ee1' })}
-      />
-    ) },
     { key: 'os' as const, scope: 'os' as Scope, card: (
       <AgentCard
         icon="O" iconColor="#2ea44f" name="OS 智能体" role="系统/硬件诊断 · 对接运维平台"
         model="deepseek-chat（私有化）" lastActive="2 小时前" sessions={28}
         lastSession="node-032 掉线根因：ToR 端口误码率 6.2%，建议切换备用链路…"
-        running source="对接：运维平台（资源性能监控平台）"
+        source="对接：运维平台（资源性能监控平台）"
         onOpen={() => openAgentSession({ name: 'OS 智能体', icon: 'O', color: '#2ea44f' })}
       />
     ) },
@@ -269,15 +260,9 @@ function AgentsTab({ role }: { role: Role }) {
         </div>
         <div style={grid}>{agents.map((a, i) => <span key={i} style={{ display: 'contents' }}>{a.card}</span>)}</div>
         <div style={{ fontSize: 12, color: V.text3, marginTop: 10 }}>
-          智能体以独立实例创建与运行，按实例绑定技能、工具与知识范围并相互隔离；支持创建、配置、启停与销毁等全生命周期管理；每个实例的会话独立归属，经"打开会话"跳转 dsh 会话界面并标识所属智能体实例，进入诊断交互。普通账户仅展示所对接系统的智能体，管理员账户可见全部实例。
+          智能体以独立实例创建与运行，按实例绑定技能、工具与知识范围并相互隔离；支持创建、配置与销毁等全生命周期管理；每个实例的会话独立归属，经"打开会话"跳转 dsh 会话界面并标识所属智能体实例，进入诊断交互。普通账户仅展示所对接系统的智能体，管理员账户可见全部实例。
         </div>
         <Pager total={agents.length} unit="个实例" />
-      </FuncCard>
-      <FuncCard name="智能体间协作转派" kind="runtime">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <Note>HPC 智能体诊断过程中识别问题属于 OS 层面时，经实例间协作通道通知 OS 智能体接手完成故障定位与处置，处置过程与结果回传发起方并纳入统一审计；反向转派同理。</Note>
-          <Switch on={collab} onChange={setCollab} label="智能体间协作转派" />
-        </div>
       </FuncCard>
     </div>
   )
@@ -566,18 +551,50 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]['key']
 
-const ROLES: { key: Role; label: string }[] = [
-  { key: 'admin', label: '管理员' },
-  { key: 'hpc', label: 'HPC 运维账户' },
-  { key: 'os', label: 'OS 运维账户' },
-]
+type Account = { name: string; role: number }
 
-/** 控制台主页：账户角色切换 + 六模块页签 + 卡片式内容区。 */
+/** 平台角色 → 控制台视图：1（系统管理员）可见全部资源，其余角色按普通运维账户过滤 */
+function toConsoleRole(role: number): Role {
+  return role === 1 ? 'admin' : 'os'
+}
+
+const inputStyle: Record<string, unknown> = {
+  fontSize: 12, borderRadius: 6, padding: '4px 8px', width: 110,
+  border: `1px solid ${V.border}`, background: 'transparent', color: V.text, outline: 'none',
+}
+
+/** 控制台主页：基础运维平台统一账号登录 + 六模块页签 + 卡片式内容区。 */
 export function AiopsConsolePage(props: { t?: (key: string) => string }) {
   const { t } = props
   const [tab, setTab] = useState<TabKey>('agents')
-  const [role, setRole] = useState<Role>('admin')
+  const [account, setAccount] = useState<Account | null>(null)
+  const [loginName, setLoginName] = useState('')
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
   const Active = TABS.find(x => x.key === tab)!.View
+  const role: Role = account ? toConsoleRole(account.role) : 'admin'
+
+  const doLogin = async () => {
+    if (!loginName || !password) { setErr('请输入账号与口令'); return }
+    setBusy(true); setErr('')
+    try {
+      const r = await fetch('http://127.0.0.1:3081/api/aiops/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: loginName, password }),
+      })
+      const j = await r.json()
+      if (j.status === 0) {
+        setAccount({ name: loginName, role: j.data.role })
+        setPassword('')
+      } else {
+        setErr(j.msg || '登录失败')
+      }
+    } catch {
+      setErr('无法连接账号认证服务')
+    } finally { setBusy(false) }
+  }
+
   return (
     <div style={{ padding: '20px 24px', maxWidth: 980, margin: '0 auto', color: V.text }}>
       <div style={{ marginBottom: 14, display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
@@ -586,40 +603,56 @@ export function AiopsConsolePage(props: { t?: (key: string) => string }) {
           <div style={{ fontSize: 12.5, color: V.text3, marginTop: 4 }}>{t?.('subtitle') ?? ''}</div>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: V.text3 }}>
-          当前账户：
-          {ROLES.map(r => (
-            <button
-              key={r.key}
-              onClick={() => setRole(r.key)}
-              style={{
-                fontSize: 12, cursor: 'pointer', borderRadius: 6, padding: '3px 10px', whiteSpace: 'nowrap',
-                border: `1px solid ${role === r.key ? V.brand : V.border}`,
-                background: role === r.key ? V.brand : 'transparent',
-                color: role === r.key ? '#ffffff' : V.text2,
-              }}
-            >{r.label}</button>
-          ))}
+          {account ? (
+            <>
+              当前账户：<Tag color={V.brand}>{account.name}</Tag>
+              <span>{account.role === 1 ? '管理员' : 'OS 运维账户'}</span>
+              <Btn onClick={() => { setAccount(null); setLoginName(''); setErr('') }}>退出登录</Btn>
+            </>
+          ) : (
+            <>
+              <span>基础运维平台账号：</span>
+              <input style={inputStyle} placeholder="账号" value={loginName} onChange={e => setLoginName((e.target as HTMLInputElement).value)} />
+              <input style={inputStyle} type="password" placeholder="口令" value={password}
+                onChange={e => setPassword((e.target as HTMLInputElement).value)}
+                onKeyDown={e => { if (e.key === 'Enter') doLogin() }} />
+              <Btn primary onClick={doLogin}>{busy ? '登录中…' : '登录'}</Btn>
+              {err && <span style={{ color: V.error, fontSize: 12 }}>{err}</span>}
+            </>
+          )}
         </div>
       </div>
-      <div style={{ display: 'flex', gap: 4, borderBottom: `1px solid ${V.border}`, marginBottom: 16 }}>
-        {TABS.map(({ key, label, Icon }) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer',
-              padding: '8px 14px', border: 'none', background: 'transparent',
-              color: tab === key ? V.brand : V.text2,
-              borderBottom: tab === key ? `2px solid ${V.brand}` : '2px solid transparent',
-              fontWeight: tab === key ? 600 : 400,
-            }}
-          >
-            <Icon size={15} />
-            {label}
-          </button>
-        ))}
-      </div>
-      <Active role={role} />
+      {!account ? (
+        <FuncCard name="统一账号认证" kind="manage">
+          <Note>
+            智能运维控制台复用基础运维平台（资源性能监控平台）的账号体系：在右上角输入平台账号与口令完成统一认证登录。
+            管理员账号（如 sysadm）登录后可见全部智能体与 RAG / skills / 日志 / 记忆 / MCP 资源；
+            普通运维账号（如 osadm）登录后仅可见其所对接系统的资源，资源按账户权限自动过滤。
+          </Note>
+        </FuncCard>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: 4, borderBottom: `1px solid ${V.border}`, marginBottom: 16 }}>
+            {TABS.map(({ key, label, Icon }) => (
+              <button
+                key={key}
+                onClick={() => setTab(key)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer',
+                  padding: '8px 14px', border: 'none', background: 'transparent',
+                  color: tab === key ? V.brand : V.text2,
+                  borderBottom: tab === key ? `2px solid ${V.brand}` : '2px solid transparent',
+                  fontWeight: tab === key ? 600 : 400,
+                }}
+              >
+                <Icon size={15} />
+                {label}
+              </button>
+            ))}
+          </div>
+          <Active role={role} />
+        </>
+      )}
     </div>
   )
 }
