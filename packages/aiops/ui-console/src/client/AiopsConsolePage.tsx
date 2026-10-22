@@ -397,8 +397,17 @@ function SkillsTab({ role }: { role: Role }) {
   )
 }
 
-/* ---------- 日志管理（多条件检索 + 详情查看 / 导出，分页） ---------- */
-function LogsTab() {
+/* ---------- 日志管理（多条件检索 + 详情查看 / 导出，分页；按账户权限过滤） ---------- */
+function LogsTab({ role }: { role: Role }) {
+  const rows = [
+    { scope: 'os' as Scope, cells: ['14:22:01', <Tag key="l1" color={V.brand}>INFO</Tag>, '运行', '诊断会话创建，载入故障上下文（node-032 down）', <span key="a1" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>] },
+    { scope: 'os' as Scope, cells: ['14:22:04', <Tag key="l2" color={V.brand}>INFO</Tag>, '知识检索', 'RAG 双路召回：语义 Top-5 + BM25 Top-5，Rerank 后注入 3 条', <span key="a2" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>] },
+    { scope: 'os' as Scope, cells: ['14:22:06', <Tag key="l3" color={V.brand}>INFO</Tag>, '模型调用', 'deepseek-chat 推理第 1 轮：决策调用 metric-query', <span key="a3" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>] },
+    { scope: 'os' as Scope, cells: ['14:22:09', <Tag key="l4" color={V.brand}>INFO</Tag>, '工具调用', 'metric-query(node-032, ib_errors) 成功，耗时 2.1s', <span key="a4" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>] },
+    { scope: 'os' as Scope, cells: ['14:22:15', <Tag key="l5" color={V.warn}>WARN</Tag>, '决策', '高危工具 node-cmd-exec 触发人工审批，等待确认', <span key="a5" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>] },
+    { scope: 'os' as Scope, cells: ['14:24:40', <Tag key="l6" color={V.brand}>INFO</Tag>, '决策', '输出根因结论：ToR 端口误码率 6.2%，附处置建议', <span key="a6" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>] },
+    { scope: 'hpc' as Scope, cells: ['15:02:11', <Tag key="l7" color={V.brand}>INFO</Tag>, '运行', 'HPC 调度器诊断会话创建（slurm 队列拥堵）', <span key="a7" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>] },
+  ].filter(r => vis(r.scope, role))
   return (
     <div style={{ display: 'grid', gap: 12 }}>
       <FuncCard name="日志查询检索" kind="manage">
@@ -407,17 +416,11 @@ function LogsTab() {
           <span style={{ ...card, padding: '4px 10px', fontSize: 12, color: V.text, fontFamily: V.mono }}>关键字：node-032</span>
           <Btn primary>查询</Btn>
           <Btn>导出</Btn>
+          {role !== 'admin' && <span style={{ marginLeft: 'auto', fontSize: 12, color: V.text3 }}>按账户权限过滤，仅显示所对接系统的日志</span>}
         </div>
         <Table
           head={['时间', '级别', '类型', '内容摘要', '操作']}
-          rows={[
-            ['14:22:01', <Tag key="l1" color={V.brand}>INFO</Tag>, '运行', '诊断会话创建，载入故障上下文（node-032 down）', <span key="a1" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>],
-            ['14:22:04', <Tag key="l2" color={V.brand}>INFO</Tag>, '知识检索', 'RAG 双路召回：语义 Top-5 + BM25 Top-5，Rerank 后注入 3 条', <span key="a2" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>],
-            ['14:22:06', <Tag key="l3" color={V.brand}>INFO</Tag>, '模型调用', 'deepseek-chat 推理第 1 轮：决策调用 metric-query', <span key="a3" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>],
-            ['14:22:09', <Tag key="l4" color={V.brand}>INFO</Tag>, '工具调用', 'metric-query(node-032, ib_errors) 成功，耗时 2.1s', <span key="a4" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>],
-            ['14:22:15', <Tag key="l5" color={V.warn}>WARN</Tag>, '决策', '高危工具 node-cmd-exec 触发人工审批，等待确认', <span key="a5" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>],
-            ['14:24:40', <Tag key="l6" color={V.brand}>INFO</Tag>, '决策', '输出根因结论：ToR 端口误码率 6.2%，附处置建议', <span key="a6" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>],
-          ]}
+          rows={rows.map(r => r.cells)}
         />
         <div style={{ fontSize: 12, color: V.text3, marginTop: 8 }}>支持按时间、关键字、会话维度检索与决策回溯，支持查看日志详情与导出。</div>
         <Pager total={328} unit="条日志" />
@@ -426,9 +429,16 @@ function LogsTab() {
   )
 }
 
-/* ---------- 记忆管理（记忆清单 + 召回配置，分页） ---------- */
-function MemoryTab() {
+/* ---------- 记忆管理（记忆清单 + 召回配置，分页；按账户权限过滤） ---------- */
+function MemoryTab({ role }: { role: Role }) {
   const [recall, setRecall] = useState(true)
+  const rows = [
+    { scope: 'os' as Scope, cells: ['node-032 掉线根因：ToR 端口误码，切换备用链路恢复', <Tag key="m1" color={V.success}>长期</Tag>, 'sess-1042', '10-19 14:40', <span key="mo1" style={{ display: 'flex', gap: 6 }}><Btn>查看</Btn><Btn>遗忘</Btn></span>] },
+    { scope: 'os' as Scope, cells: ['GPU 温度超 95℃ 优先检查风扇转速与防尘网', <Tag key="m2" color={V.success}>长期</Tag>, 'sess-1038', '10-18 11:52', <span key="mo2" style={{ display: 'flex', gap: 6 }}><Btn>查看</Btn><Btn>遗忘</Btn></span>] },
+    { scope: 'os' as Scope, cells: ['NFS 挂载超时与存储端连接数耗尽相关', <Tag key="m3" color={V.success}>长期</Tag>, 'sess-1035', '10-18 09:30', <span key="mo3" style={{ display: 'flex', gap: 6 }}><Btn>查看</Btn><Btn>遗忘</Btn></span>] },
+    { scope: 'os' as Scope, cells: ['login-01 负载异常：异常进程 python 占满 CPU', <Tag key="m4" color={V.warn}>短期</Tag>, 'sess-1045', '10-20 16:05', <span key="mo4" style={{ display: 'flex', gap: 6 }}><Btn>查看</Btn><Btn>遗忘</Btn></span>] },
+    { scope: 'hpc' as Scope, cells: ['Slurm 队列拥堵优先核查调度器回填满负荷', <Tag key="m5" color={V.success}>长期</Tag>, 'sess-1031', '10-17 15:20', <span key="mo5" style={{ display: 'flex', gap: 6 }}><Btn>查看</Btn><Btn>遗忘</Btn></span>] },
+  ].filter(r => vis(r.scope, role))
   return (
     <div style={{ display: 'grid', gap: 12 }}>
       <FuncCard name="记忆管理" kind="manage">
@@ -441,12 +451,7 @@ function MemoryTab() {
         </div>
         <Table
           head={['记忆摘要', '类型', '来源会话', '写入时间', '操作']}
-          rows={[
-            ['node-032 掉线根因：ToR 端口误码，切换备用链路恢复', <Tag key="m1" color={V.success}>长期</Tag>, 'sess-1042', '10-19 14:40', <span key="mo1" style={{ display: 'flex', gap: 6 }}><Btn>查看</Btn><Btn>遗忘</Btn></span>],
-            ['GPU 温度超 95℃ 优先检查风扇转速与防尘网', <Tag key="m2" color={V.success}>长期</Tag>, 'sess-1038', '10-18 11:52', <span key="mo2" style={{ display: 'flex', gap: 6 }}><Btn>查看</Btn><Btn>遗忘</Btn></span>],
-            ['NFS 挂载超时与存储端连接数耗尽相关', <Tag key="m3" color={V.success}>长期</Tag>, 'sess-1035', '10-18 09:30', <span key="mo3" style={{ display: 'flex', gap: 6 }}><Btn>查看</Btn><Btn>遗忘</Btn></span>],
-            ['login-01 负载异常：异常进程 python 占满 CPU', <Tag key="m4" color={V.warn}>短期</Tag>, 'sess-1045', '10-20 16:05', <span key="mo4" style={{ display: 'flex', gap: 6 }}><Btn>查看</Btn><Btn>遗忘</Btn></span>],
-          ]}
+          rows={rows.map(r => r.cells)}
         />
         <Pager total={164} unit="条记忆" />
       </FuncCard>

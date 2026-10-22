@@ -34,6 +34,8 @@ function writePlatformAccount(account: PlatformAccount | null): void {
 
 /** 平台账号认证中继地址（联调环境）。 */
 const RELAY_LOGIN_URL = 'http://127.0.0.1:3081/api/aiops/login'
+/** 免登票据核销地址：运维平台入口页跳转控制台时携带的一次性票据。 */
+const RELAY_TICKET_URL = 'http://127.0.0.1:3081/api/aiops/ticket-login'
 
 const overlayStyle: Record<string, string | number> = {
   position: 'fixed', inset: 0, background: 'rgba(15,18,24,.45)', zIndex: 9999,
@@ -106,6 +108,29 @@ export function AccountMenu({
       window.removeEventListener(PLATFORM_EVENT, sync)
       window.removeEventListener('storage', sync)
     }
+  }, [])
+  // 免登票据：运维平台入口页跳转时经 Cookie 携带 pf_ticket（dsh 认证重定向会剥离 URL 参数），
+  // 核销后自动完成平台账户登录；未命中认证缓存时预填账号并弹出登录窗，仅需补输口令
+  useEffect(() => {
+    const m = document.cookie.match(/(?:^|;\s*)pf_ticket=([^;]+)/)
+    if (!m) return
+    const ticket = m[1]
+    document.cookie = 'pf_ticket=; Path=/; Max-Age=0'
+    void (async () => {
+      try {
+        const r = await fetch(RELAY_TICKET_URL, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ticket }),
+        })
+        const j = await r.json()
+        if (j.status === 0 && j.data?.username) {
+          writePlatformAccount({ name: j.data.username, role: j.data.role })
+        } else if (j.status === 2 && j.data?.username) {
+          setPfName(j.data.username)
+          setPfLoginOpen(true)
+        }
+      } catch { /* 中继不可达时保持未登录态，用户可手动登录 */ }
+    })()
   }, [])
   const doPlatformLogin = async () => {
     if (!pfName || !pfPassword) { setPfErr('请输入账号与口令'); return }

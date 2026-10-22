@@ -327,6 +327,17 @@ function SessionTree({
 }: SessionTreeProps) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const statuses = useSessionStatus(s => s)
+  // GAC2：平台账户切换时递增版本号，强制重算会话树以应用归属过滤
+  const [accountVersion, setAccountVersion] = useState(0)
+  useEffect(() => {
+    const bump = () => setAccountVersion(v => v + 1)
+    window.addEventListener('aiops-account', bump)
+    window.addEventListener('storage', bump)
+    return () => {
+      window.removeEventListener('aiops-account', bump)
+      window.removeEventListener('storage', bump)
+    }
+  }, [])
   const current = panelActive
     ? undefined
     : Object.values(list.byId).find(session => (session.retainedBy.mainView ?? 0) > 0)?.id
@@ -377,7 +388,9 @@ function SessionTree({
       expandedGroups,
       ungroupedOrder: ungroupedSessionIds,
     }),
-    [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds],
+    // accountVersion：平台账户切换时重算会话归属过滤（GAC2）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds, accountVersion],
   )
   useEffect(() => {
     for (let key = revealGroup; key !== undefined; key = parents.get(key)) {
@@ -823,6 +836,17 @@ function SearchResults({
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const list = useSessions(s => s)
   const statuses = useSessionStatus(s => s)
+  // GAC2：平台账户切换时递增版本号，搜索结果随之重算归属过滤
+  const [accountVersion, setAccountVersion] = useState(0)
+  useEffect(() => {
+    const bump = () => setAccountVersion(v => v + 1)
+    window.addEventListener('aiops-account', bump)
+    window.addEventListener('storage', bump)
+    return () => {
+      window.removeEventListener('aiops-account', bump)
+      window.removeEventListener('storage', bump)
+    }
+  }, [])
   const currentRemote = remote.query === query
     ? remote
     : { query, status: 'loading' as const, items: [], hasMore: false }
@@ -837,7 +861,9 @@ function SearchResults({
       currentRemote,
       resultLimit,
     ),
-    [list, workspaces, query, archivedSessionIds, archivedFilter, statuses, currentRemote, resultLimit],
+    // accountVersion：平台账户切换时重算搜索结果归属过滤（GAC2）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [list, workspaces, query, archivedSessionIds, archivedFilter, statuses, currentRemote, resultLimit, accountVersion],
   )
   const pending = currentRemote.status === 'loading'
   const currentId = panelActive

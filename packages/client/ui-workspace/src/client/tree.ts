@@ -14,6 +14,52 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { workspaceTitleOf } from '@deepseek-ai/dsh-util-workspace-path'
 
+/* ---------- GAC2 平台账户会话隔离（联调级：前端归属标记 + 列表过滤） ---------- */
+/** 平台账户共享状态 localStorage 键（与 ui-settings-account / 智能运维控制台插件一致）。 */
+const PF_ACCOUNT_KEY = 'aiops.account'
+/** 会话归属标记：sessionId -> 平台账号名。 */
+const PF_OWNER_KEY = 'aiops.sessionOwners'
+
+interface PfAccount { name: string; role: number }
+
+function pfAccountRead(): PfAccount | null {
+  try {
+    const raw = localStorage.getItem(PF_ACCOUNT_KEY)
+    return raw ? JSON.parse(raw) as PfAccount : null
+  } catch { return null }
+}
+
+function pfOwnersRead(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(PF_OWNER_KEY) ?? '{}') as Record<string, string>
+  } catch { return {} }
+}
+
+/**
+ * 按平台账户过滤会话列表。
+ * 登录状态下，当前（新建或打开中的）会话若无归属标记则归属当前账户；
+ * 管理员（role 1）可见全部会话，普通账户仅见归属本人的会话，未登录不过滤。
+ * 生产实现应下沉至服务端按账户命名空间隔离存储，此处为联调级前端过滤。
+ */
+function filterSessionsByPlatformAccount(list: SessionListState): SessionListState {
+  const account = pfAccountRead()
+  if (!account) return list
+  const owners = pfOwnersRead()
+  const current = mainSessionId(list)
+  if (current !== undefined && owners[current] === undefined) {
+    owners[current] = account.name
+    try { localStorage.setItem(PF_OWNER_KEY, JSON.stringify(owners)) } catch { /* 存储不可用时跳过归属标记 */ }
+  }
+  if (account.role === 1) return list
+  const ids = list.ids.filter(id => owners[id] === account.name)
+  const byId: Record<SessionId, (typeof list.byId)[SessionId]> = {}
+  for (const id of ids) {
+    const row = list.byId[id]
+    if (row !== undefined) byId[id] = row
+  }
+  return { ...list, ids, byId }
+}
+
 /** Group key for Sessions outside every Workspace. */
 export const UNGROUPED_KEY = ''
 
@@ -440,6 +486,8 @@ export function deriveGroups(
   statuses: SessionStatuses,
   view: TreeView,
 ): GroupNode[] {
+  // GAC2：按平台账户过滤会话归属（联调级隔离，见文件头部说明）
+  list = filterSessionsByPlatformAccount(list)
   const archived = new Set(rowState.archivedSessionIds)
   const pinned = new Set(rowState.pinnedSessionIds)
   const expandedGroups = new Set(view.expandedGroups)
@@ -549,6 +597,8 @@ export function deriveSearchResults(
   content: { items: readonly SessionSearchResultItem[]; hasMore: boolean },
   limit: number,
 ): SearchResultSet {
+  // GAC2：搜索结果同样按平台账户过滤会话归属
+  list = filterSessionsByPlatformAccount(list)
   const q = query.trim().toLowerCase()
   if (q === '') return { items: [], hasMore: false }
   const archived = new Set(archivedSessionIds)
