@@ -135,7 +135,8 @@ function sessionCookie(
   maxAgeSeconds: number,
   secure: boolean,
 ): string {
-  const attributes = `${name}=${value}; Max-Age=${String(maxAgeSeconds)}; Path=/; Expires=${new Date(expiresAt).toUTCString()}; HttpOnly; SameSite=Strict`
+  // GAC2 联调修改：SameSite 由 Strict 放宽为 Lax，支持运维平台菜单跨站跳转控制台后携带会话 Cookie
+  const attributes = `${name}=${value}; Max-Age=${String(maxAgeSeconds)}; Path=/; Expires=${new Date(expiresAt).toUTCString()}; HttpOnly; SameSite=Lax`
   return secure ? `${attributes}; Secure` : attributes
 }
 
