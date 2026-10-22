@@ -34,7 +34,7 @@ import type { WorkspaceBrowserProps } from '../contract/slots.ts'
 import type { ArchivedFilter, GroupNode, SessionNode, SessionOrderBy, SessionRowState } from '../tree.ts'
 import {
   deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
-  pinCurrentBlank, reconcileManualOrder, sessionMemberIds, UNGROUPED_KEY,
+  pfSessionAgentsRead, pinCurrentBlank, reconcileManualOrder, sessionMemberIds, UNGROUPED_KEY,
 } from '../tree.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { AnimatedRows } from './AnimatedRows.tsx'
@@ -678,8 +678,34 @@ function SessionTree({
   }
 
   const groupRows = rootGroups.map(group => renderGroup(group, 0))
+  // GAC2：当前会话所属智能体实例徽标（随会话切换与归属落账自动跟随，无归属不显示）
+  const currentAgentKey = current === undefined ? undefined : pfSessionAgentsRead()[current]
   return (
     <HoverCardGroup className={clsx(css.treeBody, css.wide)}>
+      {currentAgentKey !== undefined && (
+        <div
+          style={{
+            position: 'fixed', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 9999,
+            display: 'flex', alignItems: 'center', gap: 8, padding: '5px 14px', borderRadius: 16,
+            background: 'var(--dsw-alias-bg-module-platform, #fff)',
+            border: '1px solid var(--dsw-alias-brand-primary, #5b6ee1)',
+            boxShadow: '0 2px 10px rgba(0,0,0,.10)', fontSize: 12.5,
+            color: 'var(--dsw-alias-label-primary, #222)', pointerEvents: 'none',
+          }}
+        >
+          <span
+            style={{
+              width: 18, height: 18, borderRadius: 9, background: '#2ea44f', color: '#fff',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 11, fontWeight: 600,
+            }}
+          >
+            {currentAgentKey === 'os' ? 'OS' : currentAgentKey.slice(0, 2).toUpperCase()}
+          </span>
+          <span>当前会话智能体：<b>{currentAgentKey === 'os' ? 'OS 智能体' : currentAgentKey}</b></span>
+          <span style={{ color: 'var(--dsw-alias-label-tertiary, #999)' }}>会话归属该实例 · 按登录账户隔离</span>
+        </div>
+      )}
       {workspaceDropAtListStart && <span className={css.listTopDropIndicator} aria-hidden="true" />}
       <AnimatedRows
         className={clsx(css.list, workspaceDropAtListStart && css.listTopDropActive)}

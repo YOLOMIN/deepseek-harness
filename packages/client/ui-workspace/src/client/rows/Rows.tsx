@@ -641,6 +641,19 @@ export function SessionNodeItem({
           ? undefined
           : (e) => { e.stopPropagation(); onRenameRequest(node.id, row.title) }}
       >
+        {row.agentKey !== undefined && (
+          <span
+            title="归属智能体实例"
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 15, height: 15, borderRadius: 8, marginRight: 4,
+              background: '#2ea44f', color: '#fff', fontSize: 10, fontWeight: 600,
+              verticalAlign: '1px',
+            }}
+          >
+            {row.agentKey === 'os' ? 'OS' : row.agentKey.slice(0, 2).toUpperCase()}
+          </span>
+        )}
         {title}
       </span>
       {/* A blank New Session row is a provisional placeholder: nothing has

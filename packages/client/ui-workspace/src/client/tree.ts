@@ -19,6 +19,12 @@ import { workspaceTitleOf } from '@deepseek-ai/dsh-util-workspace-path'
 const PF_ACCOUNT_KEY = 'aiops.account'
 /** 会话归属标记：sessionId -> 平台账号名。 */
 const PF_OWNER_KEY = 'aiops.sessionOwners'
+/** 会话-智能体实例归属标记：sessionId -> 智能体 key（如 'os'）。 */
+const PF_AGENT_KEY = 'aiops.sessionAgents'
+/** 控制台"打开会话"设置的待归属实例：下一个当前会话归属该实例。 */
+const PF_PENDING_AGENT_KEY = 'aiops.pendingAgent'
+/** 待归属标记对应的点击前主会话 id（防止误归属旧会话，见 pfAssignPendingAgent） */
+const PF_PENDING_PREV_KEY = 'aiops.pendingPrev'
 
 interface PfAccount { name: string; role: number }
 
@@ -35,6 +41,53 @@ function pfOwnersRead(): Record<string, string> {
   } catch { return {} }
 }
 
+/** 读取会话-智能体实例归属表（sessionId -> 实例 key）。 */
+export function pfSessionAgentsRead(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(PF_AGENT_KEY) ?? '{}') as Record<string, string>
+  } catch { return {} }
+}
+
+/**
+ * 待归属实例落账：控制台"打开会话"点击后设置 pendingAgent，
+ * 会话树重算时若主会话已切换为点击后新建的会话且尚无实例归属，
+ * 则归属该实例并清除待归属标记。
+ * 首次见到待归属标记时先记录点击前主会话（pendingPrev），仅当主会话
+ * 变为另一会话后才落账，避免会话异步创建期间误归属到点击前打开的旧会话。
+ * 与账户登录状态无关（实例归属是独立于账户的维度）。
+ */
+function pfAssignPendingAgent(list: SessionListState): void {
+  let pending: string | null = null
+  try { pending = localStorage.getItem(PF_PENDING_AGENT_KEY) } catch { return }
+  if (!pending) return
+  const current = mainSessionId(list)
+  let prev: string | null = null
+  try { prev = localStorage.getItem(PF_PENDING_PREV_KEY) } catch { /* ignore */ }
+  if (prev === null) {
+    try { localStorage.setItem(PF_PENDING_PREV_KEY, current ?? '') } catch { /* ignore */ }
+    return
+  }
+  if (current === undefined) return
+  if (prev !== '' && current === prev) return
+  const clear = () => {
+    try {
+      localStorage.removeItem(PF_PENDING_AGENT_KEY)
+      localStorage.removeItem(PF_PENDING_PREV_KEY)
+    } catch { /* ignore */ }
+  }
+  const agents = pfSessionAgentsRead()
+  if (agents[current] !== undefined) {
+    // 用户中途切到了已有归属的会话，放弃本次待归属
+    clear()
+    return
+  }
+  agents[current] = pending
+  try {
+    localStorage.setItem(PF_AGENT_KEY, JSON.stringify(agents))
+  } catch { /* 存储不可用时跳过归属标记 */ }
+  clear()
+}
+
 /**
  * 按平台账户过滤会话列表。
  * 登录状态下，当前（新建或打开中的）会话若无归属标记则归属当前账户；
@@ -42,6 +95,7 @@ function pfOwnersRead(): Record<string, string> {
  * 生产实现应下沉至服务端按账户命名空间隔离存储，此处为联调级前端过滤。
  */
 function filterSessionsByPlatformAccount(list: SessionListState): SessionListState {
+  pfAssignPendingAgent(list)
   const account = pfAccountRead()
   if (!account) return list
   const owners = pfOwnersRead()
@@ -93,6 +147,8 @@ export interface SessionNode {
   title: string
   /** The provisional blank session (renderer shows the localized New Session title). */
   blank: boolean
+  /** GAC2：所属智能体实例 key（联调级前端归属标记，无归属为 undefined）。 */
+  agentKey?: string
   /** A Session-scoped UI consumer is awaiting this user. */
   pendingInteraction?: SessionPendingInteractionStatus
   running: boolean
@@ -449,6 +505,7 @@ function sessionNode(
 ): SessionNode {
   const status = statuses.get(s.id)
   const pendingInteraction = visiblePendingKind(status?.pendingInteraction?.kind)
+  const agentKey = pfSessionAgentsRead()[s.id]
   return {
     id: s.id,
     title: sessionTitle(s),
@@ -460,6 +517,7 @@ function sessionNode(
     archived: archived.has(s.id),
     updatedAt: s.updatedAt,
     ...(pendingInteraction === undefined ? {} : { pendingInteraction }),
+    ...(agentKey === undefined ? {} : { agentKey }),
   }
 }
 

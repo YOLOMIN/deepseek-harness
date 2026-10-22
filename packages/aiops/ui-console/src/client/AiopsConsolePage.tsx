@@ -6,6 +6,7 @@
  * 会话管理直接复用 dsh 既有会话功能，不在控制台重复建设。
  */
 import { useEffect, useState } from 'react'
+import { closeConsolePanel, consumeInitialTab } from './initial-tab.ts'
 import {
   IconDatabaseOutlineRegular,
   IconSkillOutlineRegular,
@@ -201,9 +202,11 @@ function AgentCard(props: {
   )
 }
 
-/* ---------- 打开会话：跳转 dsh 既有会话界面并标识所属智能体实例 ---------- */
-/** 点击"打开会话"：跳转 dsh 既有会话界面（新建会话入口），展开侧边栏会话列表，并在会话界面顶部注入所属智能体标识徽标。 */
-function openAgentSession(agent: { name: string; icon: string; color: string }) {
+/* ---------- 打开会话：跳转 dsh 既有会话界面并归属对应智能体实例 ---------- */
+/** 点击"打开会话"：设置待归属实例 → 新建会话 → 关闭控制台面板回到会话主界面；
+ * 会话树重算时自动归属（aiops.sessionAgents），会话界面顶部徽标与会话列表实例徽标由 ui-workspace 按归属渲染。 */
+function openAgentSession(agent: { name: string; icon: string; color: string; key: string }) {
+  try { localStorage.setItem('aiops.pendingAgent', agent.key) } catch { /* 存储不可用时跳过 */ }
   const byLabel = (l: string) =>
     Array.from(document.querySelectorAll('button')).find(x => x.getAttribute('aria-label') === l) as HTMLButtonElement | undefined
   const newChat =
@@ -214,27 +217,12 @@ function openAgentSession(agent: { name: string; icon: string; color: string }) 
     byLabel('打开侧边栏')?.click()
     setTimeout(() => byLabel('新建会话')?.click(), 120)
   }
-  setTimeout(() => {
-    const toggle = byLabel('打开侧边栏')
-    if (toggle) toggle.click()
-    document.getElementById('aiops-agent-badge')?.remove()
-    const badge = document.createElement('div')
-    badge.id = 'aiops-agent-badge'
-    badge.style.cssText = [
-      'position:fixed', 'top:12px', 'left:50%', 'transform:translateX(-50%)', 'z-index:9999',
-      'display:flex', 'align-items:center', 'gap:8px', 'padding:5px 14px', 'border-radius:16px',
-      'background:var(--dsw-alias-bg-module-platform,#fff)',
-      'border:1px solid var(--dsw-alias-brand-primary,#5b6ee1)',
-      'box-shadow:0 2px 10px rgba(0,0,0,.10)', 'font-size:12.5px',
-      'color:var(--dsw-alias-label-primary,#222)',
-    ].join(';')
-    badge.innerHTML =
-      `<span style="width:18px;height:18px;border-radius:9px;background:${agent.color};color:#fff;` +
-      `display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">${agent.icon}</span>` +
-      `<span>当前会话智能体：<b>${agent.name}</b></span>` +
-      `<span style="color:var(--dsw-alias-label-tertiary,#999)">会话归属该实例 · 按登录账户隔离</span>`
-    document.body.appendChild(badge)
-  }, 80)
+  // 关闭控制台面板，露出会话主界面（面板激活时 ui-workspace 会屏蔽当前会话徽标）
+  setTimeout(() => closeConsolePanel(), 60)
+  // 触发会话树重算以完成归属落账与徽标渲染（会话异步创建，多次派发确保落账）
+  for (const ms of [200, 500, 900, 1400, 2000, 2800]) {
+    setTimeout(() => window.dispatchEvent(new Event('aiops-account')), ms)
+  }
 }
 
 function AgentsTab({ role }: { role: Role }) {
@@ -245,7 +233,7 @@ function AgentsTab({ role }: { role: Role }) {
         model="deepseek-chat（私有化）" lastActive="2 小时前" sessions={28}
         lastSession="node-032 掉线根因：ToR 端口误码率 6.2%，建议切换备用链路…"
         source="对接：运维平台（资源性能监控平台）"
-        onOpen={() => openAgentSession({ name: 'OS 智能体', icon: 'O', color: '#2ea44f' })}
+        onOpen={() => openAgentSession({ name: 'OS 智能体', icon: 'O', color: '#2ea44f', key: 'os' })}
       />
     ) },
   ].filter(a => vis(a.scope, role))
@@ -582,7 +570,11 @@ function readPlatformAccount(): Account | null {
 /** 控制台主页：六模块页签 + 卡片式内容区；账户体系统一在左下角（ui-settings-account 平台账户模式）。 */
 export function AiopsConsolePage(props: { t?: (key: string) => string }) {
   const { t } = props
-  const [tab, setTab] = useState<TabKey>('agents')
+  // 初始页签：平台入口页跳转指定（pf_tab Cookie → consumeInitialTab），默认智能体管理
+  const [tab, setTab] = useState<TabKey>(() => {
+    const v = consumeInitialTab()
+    return TABS.some(x => x.key === v) ? v as TabKey : 'agents'
+  })
   const [account, setAccount] = useState<Account | null>(readPlatformAccount)
   useEffect(() => {
     const sync = () => setAccount(readPlatformAccount())
