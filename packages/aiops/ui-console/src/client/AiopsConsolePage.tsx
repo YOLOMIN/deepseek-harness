@@ -5,7 +5,7 @@
  * 控制台按登录账户权限过滤可见资源：普通账户仅见所对接系统的智能体与资源，管理员可见全部。
  * 会话管理直接复用 dsh 既有会话功能，不在控制台重复建设。
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   IconDatabaseOutlineRegular,
   IconSkillOutlineRegular,
@@ -563,37 +563,33 @@ const inputStyle: Record<string, unknown> = {
   border: `1px solid ${V.border}`, background: 'transparent', color: V.text, outline: 'none',
 }
 
-/** 控制台主页：基础运维平台统一账号登录 + 六模块页签 + 卡片式内容区。 */
+/** 平台账户共享状态：localStorage 键 + 窗口事件，与左下角账户组件（ui-settings-account）共用。 */
+const PLATFORM_KEY = 'aiops.account'
+const PLATFORM_EVENT = 'aiops-account'
+
+function readPlatformAccount(): Account | null {
+  try {
+    const raw = localStorage.getItem(PLATFORM_KEY)
+    return raw ? JSON.parse(raw) as Account : null
+  } catch { return null }
+}
+
+/** 控制台主页：六模块页签 + 卡片式内容区；账户体系统一在左下角（ui-settings-account 平台账户模式）。 */
 export function AiopsConsolePage(props: { t?: (key: string) => string }) {
   const { t } = props
   const [tab, setTab] = useState<TabKey>('agents')
-  const [account, setAccount] = useState<Account | null>(null)
-  const [loginName, setLoginName] = useState('')
-  const [password, setPassword] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
+  const [account, setAccount] = useState<Account | null>(readPlatformAccount)
+  useEffect(() => {
+    const sync = () => setAccount(readPlatformAccount())
+    window.addEventListener(PLATFORM_EVENT, sync)
+    window.addEventListener('storage', sync)
+    return () => {
+      window.removeEventListener(PLATFORM_EVENT, sync)
+      window.removeEventListener('storage', sync)
+    }
+  }, [])
   const Active = TABS.find(x => x.key === tab)!.View
   const role: Role = account ? toConsoleRole(account.role) : 'admin'
-
-  const doLogin = async () => {
-    if (!loginName || !password) { setErr('请输入账号与口令'); return }
-    setBusy(true); setErr('')
-    try {
-      const r = await fetch('http://127.0.0.1:3081/api/aiops/login', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: loginName, password }),
-      })
-      const j = await r.json()
-      if (j.status === 0) {
-        setAccount({ name: loginName, role: j.data.role })
-        setPassword('')
-      } else {
-        setErr(j.msg || '登录失败')
-      }
-    } catch {
-      setErr('无法连接账号认证服务')
-    } finally { setBusy(false) }
-  }
 
   return (
     <div style={{ padding: '20px 24px', maxWidth: 980, margin: '0 auto', color: V.text }}>
@@ -602,30 +598,18 @@ export function AiopsConsolePage(props: { t?: (key: string) => string }) {
           <div style={{ fontSize: 18, fontWeight: 600 }}>{t?.('title') ?? '智能运维控制台'}</div>
           <div style={{ fontSize: 12.5, color: V.text3, marginTop: 4 }}>{t?.('subtitle') ?? ''}</div>
         </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: V.text3 }}>
-          {account ? (
-            <>
-              当前账户：<Tag color={V.brand}>{account.name}</Tag>
-              <span>{account.role === 1 ? '管理员' : 'OS 运维账户'}</span>
-              <Btn onClick={() => { setAccount(null); setLoginName(''); setErr('') }}>退出登录</Btn>
-            </>
-          ) : (
-            <>
-              <span>基础运维平台账号：</span>
-              <input style={inputStyle} placeholder="账号" value={loginName} onChange={e => setLoginName((e.target as HTMLInputElement).value)} />
-              <input style={inputStyle} type="password" placeholder="口令" value={password}
-                onChange={e => setPassword((e.target as HTMLInputElement).value)}
-                onKeyDown={e => { if (e.key === 'Enter') doLogin() }} />
-              <Btn primary onClick={doLogin}>{busy ? '登录中…' : '登录'}</Btn>
-              {err && <span style={{ color: V.error, fontSize: 12 }}>{err}</span>}
-            </>
-          )}
-        </div>
+        {account && (
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: V.text3 }}>
+            当前账户：<Tag color={V.brand}>{account.name}</Tag>
+            <span>{account.role === 1 ? '管理员' : '运维账户'}（按账户权限过滤资源）</span>
+          </div>
+        )}
       </div>
       {!account ? (
         <FuncCard name="统一账号认证" kind="manage">
           <Note>
-            智能运维控制台复用基础运维平台（资源性能监控平台）的账号体系：在右上角输入平台账号与口令完成统一认证登录。
+            智能运维控制台复用基础运维平台（资源性能监控平台）的账号体系统一认证，账户入口在左下角：
+            点击左下角"平台账户登录"，输入平台账号与口令完成登录。
             管理员账号（如 sysadm）登录后可见全部智能体与 RAG / skills / 日志 / 记忆 / MCP 资源；
             普通运维账号（如 osadm）登录后仅可见其所对接系统的资源，资源按账户权限自动过滤。
           </Note>
