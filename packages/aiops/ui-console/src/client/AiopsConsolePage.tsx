@@ -484,10 +484,10 @@ function McpTab({ role }: { role: Role }) {
     ) },
     { scope: 'os' as Scope, card: (
       <ItemCard
-        icon="业" iconColor="#b26a00" name="平台业务服务" meta="mcp-platform · 工具 8"
-        desc="运维平台业务能力封装：资产信息、工单、巡检任务等平台业务接口调用。"
+        icon="业" iconColor="#b26a00" name="高性能集群监控平台" meta="ks-scmms-ops · 工具 3"
+        desc="运维平台智能模块经 MCP 暴露的运维能力：metric-query（指标查询）、alarm-list（告警查询）、node-cmd-exec（节点命令执行·高危审批），支撑诊断结论的方案处置闭环。"
         tags={[{ color: V.text3, text: 'Streamable HTTP' }, { color: V.success, text: '已连接' }]}
-        source="来自 技能库 nacos"
+        source="端点 http://192.168.10.95:9091/mcp · Bearer Token 认证"
         actions={<Btn>断开</Btn>}
       />
     ) },
