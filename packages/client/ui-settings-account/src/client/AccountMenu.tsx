@@ -1,15 +1,8 @@
 /** Sidebar account launcher and locally authoritative sign-out action. */
 import { useEffect, useRef, useState } from 'react'
-import {
-  Toast, Menu, IconEllipsisOutlineMedium, IconPaperPlaneOutlineMedium, IconSettingsOutlineMedium, IconUserOutlineMedium,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconUserOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { AccountSectionInjected } from './AccountSection.tsx'
-import { SignOutDialog } from './SignOutDialog.tsx'
-import { SignInDialog } from './SignInDialog.tsx'
-import { LogoutIcon } from './LogoutIcon.tsx'
-import { AccountAvatar } from './AccountAvatar.tsx'
-import { AccountNoticeStack } from './AccountNotice.tsx'
 import css from './AccountMenu.module.css'
 
 /* ---------- GAC2 平台统一账户（左下角唯一账户入口） ---------- */
@@ -65,9 +58,7 @@ export type AccountMenuProps = PropsRuntime<'settings.launcher'> & PropsLocale<'
  * @returns account menu launcher.
  */
 export function AccountMenu({
-  subscribeSessionExpired, subscribeModelSignInRequired, wide, settingsShortcut, openSettings, openOnboarding, settingsOpen,
-  useAccount, useTheme, signOut, hasRunningAccountTasks, refreshAccount, bonusNoticeShown, bonusNoticeDismissed,
-  contactUs, showLogin, start, cancel, avatarFailed, t,
+  subscribeSessionExpired, subscribeModelSignInRequired, wide, openSettings, settingsOpen, refreshAccount,
 }: AccountMenuProps) {
   const anchor = useRef<HTMLDivElement>(null)
   // The launcher outlives the panel, so a false-to-true edge is one Settings entry:
@@ -77,20 +68,11 @@ export function AccountMenu({
     if (settingsOpen && !settingsWasOpen.current) void refreshAccount()
     settingsWasOpen.current = settingsOpen
   }, [refreshAccount, settingsOpen])
-  const account = useAccount(state => state)
-  const colorScheme = useTheme(snapshot => snapshot.active.colorScheme)
-  const signedIn = account.view?.status === 'credential-stored'
-  const [signInNotice, setSignInNotice] = useState(0)
+  const [, setSignInNotice] = useState(0)
   useEffect(() => subscribeModelSignInRequired?.(() => { setSignInNotice(value => value + 1) }), [subscribeModelSignInRequired])
-  const [expiryNotice, setExpiryNotice] = useState(false)
+  const [, setExpiryNotice] = useState(false)
   useEffect(() => subscribeSessionExpired?.(() => { setExpiryNotice(true) }), [subscribeSessionExpired])
-  const profile = account.details?.profile
-  const label = profile === undefined ? null : profile.status === 'ready'
-    ? profile.value.name ?? profile.value.contact ?? t('signedIn') : t('signedIn')
-  const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
-  const [busy, setBusy] = useState(false)
-  const [signOutImpact, setSignOutImpact] = useState<boolean | 'unknown'>()
 
   /* ---------- GAC2 平台统一账户模式：左下角为唯一账户入口 ---------- */
   const [platformAccount, setPlatformAccount] = useState<PlatformAccount | null>(readPlatformAccount)
