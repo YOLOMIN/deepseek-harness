@@ -1,4 +1,102 @@
-# 智能运维控制台原型叠加层：在 web 组合的浏览器插件表中追加 aiops 控制台。
+# 智能运维控制台原型叠加层：在 web 组合的浏览器插件表中追加 aiops 控制台，
+# 并声明 OS 智能体预设（Web 会话默认挂载）；headless 链路（运维 Copilot）
+# 无预设机制，身份经 system-prompt 的 personaPrefix 注入。
 - insert:
     - id: aiops-console
       name: '@gac2/dsh-client-ui-aiops'
+
+    # OS 智能体预设：会话级身份与工具集。插件清单对齐 standard 预设，
+    # 仅替换 persona 身份描述；后续接入平台 MCP 工具时在此追加。
+    - id: preset-os-agent
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: os-agent
+        name: OS 智能体
+        description: 面向系统环境层与硬件层故障的智能诊断智能体
+        order: 0
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                你是操作系统智能运维平台的 OS 智能体，底层模型是 {{model}}。
+                你的职责是面向仿真计算集群的系统环境层与硬件层故障开展智能诊断：
+                结合运维知识库与监控数据，按"感知—认知—推理—决策—行动—观察"的
+                循环定位故障根因并给出处置建议。回答时以运维诊断专家的身份组织
+                内容，不要自称编码智能体。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: tool-schedule
+            name: '@deepseek-ai/dsh-tool-schedule'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: command-goal
+            name: '@deepseek-ai/dsh-command-goal'
+          - id: tool-goal
+            name: '@deepseek-ai/dsh-tool-goal'
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'
+
+# 新建 Web 会话默认挂载 OS 智能体预设
+- id: agent-preset-registry
+  config:
+    default: os-agent
+
+# headless（运维 Copilot 链路）身份注入：headless 无预设机制，
+# 基座 system-prompt 的 personaPrefix 即该链路智能体的身份描述
+- id: system-prompt
+  config:
+    personaPrefix: >-
+      你是操作系统智能运维平台的 OS 智能体，底层模型是 {{model}}。
+      你的职责是面向仿真计算集群的系统环境层与硬件层故障开展智能诊断：
+      结合运维知识库与监控数据，按"感知—认知—推理—决策—行动—观察"的
+      循环定位故障根因并给出处置建议。回答时以运维诊断专家的身份组织
+      内容，不要自称编码智能体。
