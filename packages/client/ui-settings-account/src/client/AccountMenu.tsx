@@ -1,12 +1,17 @@
 /** Sidebar account launcher and locally authoritative sign-out action. */
 import { useEffect, useRef, useState } from 'react'
-import { IconUserOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  Toast, Menu, IconEllipsisOutlineMedium, IconPaperPlaneOutlineMedium, IconSettingsOutlineMedium, IconUserOutlineMedium,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { AccountSectionInjected } from './AccountSection.tsx'
+import { SignOutDialog } from './SignOutDialog.tsx'
+import { SignInDialog } from './SignInDialog.tsx'
+import { LogoutIcon } from './LogoutIcon.tsx'
+import { AccountAvatar } from './AccountAvatar.tsx'
+import { AccountNoticeStack } from './AccountNotice.tsx'
 import css from './AccountMenu.module.css'
 
-/* ---------- GAC2 平台统一账户（左下角唯一账户入口） ---------- */
-/** 平台账户共享状态：localStorage 键 + 窗口事件，控制台插件页与本组件共用。 */
 const PLATFORM_KEY = 'aiops.account'
 const PLATFORM_EVENT = 'aiops-account'
 
@@ -25,10 +30,32 @@ function writePlatformAccount(account: PlatformAccount | null): void {
   window.dispatchEvent(new Event(PLATFORM_EVENT))
 }
 
-/** 平台账号认证中继地址（联调环境）。 */
 const RELAY_LOGIN_URL = 'http://127.0.0.1:3081/api/aiops/login'
-/** 免登票据核销地址：运维平台入口页跳转控制台时携带的一次性票据。 */
 const RELAY_TICKET_URL = 'http://127.0.0.1:3081/api/aiops/ticket-login'
+
+interface PlatformReply {
+  status: number | undefined
+  msg: string | undefined
+  username: string | undefined
+  role: number | undefined
+}
+
+function recordOf(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
+}
+
+async function readPlatformReply(response: Response): Promise<PlatformReply> {
+  const body = recordOf(await response.json())
+  const data = recordOf(body?.data)
+  return {
+    status: typeof body?.status === 'number' ? body.status : undefined,
+    msg: typeof body?.msg === 'string' ? body.msg : undefined,
+    username: typeof data?.username === 'string' ? data.username : undefined,
+    role: typeof data?.role === 'number' ? data.role : undefined,
+  }
+}
 
 const overlayStyle: Record<string, string | number> = {
   position: 'fixed', inset: 0, background: 'rgba(15,18,24,.45)', zIndex: 9999,
@@ -58,7 +85,9 @@ export type AccountMenuProps = PropsRuntime<'settings.launcher'> & PropsLocale<'
  * @returns account menu launcher.
  */
 export function AccountMenu({
-  subscribeSessionExpired, subscribeModelSignInRequired, wide, openSettings, settingsOpen, refreshAccount,
+  subscribeSessionExpired, subscribeModelSignInRequired, wide, settingsShortcut, openSettings, openOnboarding, settingsOpen,
+  useAccount, useTheme, signOut, hasRunningAccountTasks, refreshAccount, bonusNoticeShown, bonusNoticeDismissed,
+  contactUs, showLogin, start, cancel, avatarFailed, t,
 }: AccountMenuProps) {
   const anchor = useRef<HTMLDivElement>(null)
   // The launcher outlives the panel, so a false-to-true edge is one Settings entry:
@@ -68,22 +97,33 @@ export function AccountMenu({
     if (settingsOpen && !settingsWasOpen.current) void refreshAccount()
     settingsWasOpen.current = settingsOpen
   }, [refreshAccount, settingsOpen])
-  const [, setSignInNotice] = useState(0)
+  const account = useAccount(state => state)
+  const colorScheme = useTheme(snapshot => snapshot.active.colorScheme)
+  const signedIn = account.view?.status === 'credential-stored'
+  const [signInNotice, setSignInNotice] = useState(0)
   useEffect(() => subscribeModelSignInRequired?.(() => { setSignInNotice(value => value + 1) }), [subscribeModelSignInRequired])
-  const [, setExpiryNotice] = useState(false)
+  const [expiryNotice, setExpiryNotice] = useState(false)
   useEffect(() => subscribeSessionExpired?.(() => { setExpiryNotice(true) }), [subscribeSessionExpired])
+  const profile = account.details?.profile
+  const label = profile === undefined ? null : profile.status === 'ready'
+    ? profile.value.name ?? profile.value.contact ?? t('signedIn') : t('signedIn')
+  const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
-
-  /* ---------- GAC2 平台统一账户模式：左下角为唯一账户入口 ---------- */
+  const [busy, setBusy] = useState(false)
+  const [signOutImpact, setSignOutImpact] = useState<boolean | 'unknown'>()
   const [platformAccount, setPlatformAccount] = useState<PlatformAccount | null>(readPlatformAccount)
-  const [pfMenuOpen, setPfMenuOpen] = useState(false)
   const [pfLoginOpen, setPfLoginOpen] = useState(false)
   const [pfName, setPfName] = useState('')
   const [pfPassword, setPfPassword] = useState('')
   const [pfBusy, setPfBusy] = useState(false)
   const [pfErr, setPfErr] = useState('')
+  const deepSeekWasSignedIn = useRef(signedIn)
   useEffect(() => {
-    const sync = () => setPlatformAccount(readPlatformAccount())
+    if (signedIn && !deepSeekWasSignedIn.current) writePlatformAccount(null)
+    deepSeekWasSignedIn.current = signedIn
+  }, [signedIn])
+  useEffect(() => {
+    const sync = () => { setPlatformAccount(readPlatformAccount()) }
     window.addEventListener(PLATFORM_EVENT, sync)
     window.addEventListener('storage', sync)
     return () => {
@@ -91,8 +131,6 @@ export function AccountMenu({
       window.removeEventListener('storage', sync)
     }
   }, [])
-  // 免登票据：运维平台入口页跳转时经 Cookie 携带 pf_ticket（dsh 认证重定向会剥离 URL 参数），
-  // 核销后自动完成平台账户登录；未命中认证缓存时预填账号并弹出登录窗，仅需补输口令
   useEffect(() => {
     const m = document.cookie.match(/(?:^|;\s*)pf_ticket=([^;]+)/)
     if (!m) return
@@ -104,76 +142,99 @@ export function AccountMenu({
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ticket }),
         })
-        const j = await r.json()
-        if (j.status === 0 && j.data?.username) {
-          writePlatformAccount({ name: j.data.username, role: j.data.role })
-        } else if (j.status === 2 && j.data?.username) {
-          setPfName(j.data.username)
+        const reply = await readPlatformReply(r)
+        if (reply.status === 0 && reply.username && reply.role !== undefined) {
+          writePlatformAccount({ name: reply.username, role: reply.role })
+        } else if (reply.status === 2 && reply.username) {
+          setPfName(reply.username)
           setPfLoginOpen(true)
         }
-      } catch { /* 中继不可达时保持未登录态，用户可手动登录 */ }
+      } catch { /* Keep both sign-in entries available when the relay is offline. */ }
     })()
   }, [])
+  const requestSignOut = async () => {
+    setBusy(true)
+    try { setSignOutImpact(await hasRunningAccountTasks()); setOpen(false) }
+    catch (_error) { setSignOutImpact('unknown'); setOpen(false) }
+    finally { setBusy(false) }
+  }
+  // The plugin's start publishes `loginFailed` before it rejects, so the dialog owns the report.
+  const beginSignIn = (): void => { setOpen(false); void start().catch(() => undefined) }
   const doPlatformLogin = async () => {
-    if (!pfName || !pfPassword) { setPfErr('请输入账号与口令'); return }
+    if (!pfName || !pfPassword) { setPfErr(t('platformCredentialsRequired')); return }
     setPfBusy(true); setPfErr('')
     try {
       const r = await fetch(RELAY_LOGIN_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: pfName, password: pfPassword }),
       })
-      const j = await r.json()
-      if (j.status === 0) {
-        writePlatformAccount({ name: pfName, role: j.data.role })
+      const reply = await readPlatformReply(r)
+      if (reply.status === 0 && reply.role !== undefined) {
+        writePlatformAccount({ name: pfName, role: reply.role })
         setPfLoginOpen(false); setPfPassword('')
       } else {
-        setPfErr(j.msg || '登录失败')
+        setPfErr(reply.msg || t('platformLoginFailed'))
       }
-    } catch { setPfErr('无法连接账号认证服务') } finally { setPfBusy(false) }
+    } catch { setPfErr(t('platformUnavailable')) } finally { setPfBusy(false) }
   }
-  // 平台账户模式：替代原 DeepSeek 在线账户启动器，保持控制台单套账户体系
-  return <div ref={anchor} className={css.root} style={{ position: 'relative' }}>
-    <button ref={trigger} type="button" className={css.trigger} data-collapsed={!wide} aria-label="平台账户"
-      onClick={() => { platformAccount ? setPfMenuOpen(v => !v) : setPfLoginOpen(true) }}>
-      <span className={css.avatar} style={{
-        background: platformAccount ? 'var(--dsw-alias-brand-primary,#5b6ee1)' : 'var(--dsw-alias-border-l,#e3e6ea)',
-        color: platformAccount ? 'var(--dsw-alias-bg-module-platform,#ffffff)' : 'var(--dsw-alias-label-secondary,#4a5568)',
-        fontSize: 12, fontWeight: 600,
-      }}>
-        {platformAccount ? platformAccount.name.charAt(0).toUpperCase() : <IconUserOutlineMedium size={14} />}
-      </span>
-      {wide && <span className={css.label}>{platformAccount ? platformAccount.name : '平台账户登录'}</span>}
-    </button>
-    {pfMenuOpen && platformAccount && (
-      <div style={{
-        position: 'absolute', bottom: 46, left: 6, zIndex: 9999, minWidth: 180, borderRadius: 8, padding: 6,
-        background: 'var(--dsw-alias-bg-module-platform,#ffffff)', color: 'var(--dsw-alias-label-primary,#1f2328)',
-        boxShadow: '0 8px 24px rgba(0,0,0,.22)', fontSize: 13,
-      }}>
-        <div style={{ padding: '6px 10px', color: 'var(--dsw-alias-label-tertiary,#8a94a6)', fontSize: 12 }}>
-          {platformAccount.name} · {platformAccount.role === 1 ? '系统管理员' : '运维账户'}
-        </div>
-        <button type="button" style={{ display: 'block', width: '100%', textAlign: 'left', border: 0, background: 'transparent', padding: '7px 10px', borderRadius: 6, cursor: 'pointer', color: 'inherit', fontSize: 13 }}
-          onClick={() => { setPfMenuOpen(false); openSettings() }}>设置</button>
-        <button type="button" style={{ display: 'block', width: '100%', textAlign: 'left', border: 0, background: 'transparent', padding: '7px 10px', borderRadius: 6, cursor: 'pointer', color: 'var(--dsw-alias-state-error-primary,#d73a49)', fontSize: 13 }}
-          onClick={() => { setPfMenuOpen(false); writePlatformAccount(null) }}>退出平台登录</button>
-      </div>
-    )}
+  return <div ref={anchor} className={css.root}>
+    {signInNotice > 0 && <Toast key={signInNotice} text={t('modelSignInRequired')} onDone={() => { setSignInNotice(0) }} />}
+    {expiryNotice && <Toast text={t('sessionExpired')} onDone={() => { setExpiryNotice(false) }} />}
+    {signedIn && !account.desktopOnboardingVisible && !account.onboarding && account.notices && <AccountNoticeStack
+      notices={account.notices}
+      anchor={anchor} title={t('bonusNoticeTitle')} closeLabel={t('close')}
+      onShown={bonusNoticeShown} onDismiss={bonusNoticeDismissed} />}
+    <Menu open={open} side="top" portal autoFocus className={css.anchor} listClassName={signedIn || platformAccount ? undefined : css.signedOutMenu}
+      anchor={<button ref={trigger} type="button" className={css.trigger} data-collapsed={!wide} data-signed-out={!signedIn && !platformAccount} aria-label={t('menu')}
+        aria-haspopup="menu" aria-expanded={open} onClick={() => { setOpen(value => !value) }}>
+        {platformAccount
+          ? <span className={css.avatar}>{platformAccount.name.charAt(0).toUpperCase()}</span>
+          : signedIn
+            ? <span className={css.avatar} data-avatar-status={account.avatar?.status}>
+              <AccountAvatar avatar={account.avatar} avatarFailed={avatarFailed} />
+            </span>
+            : <IconEllipsisOutlineMedium size={14} />}
+        {wide && <span className={css.label}>{platformAccount?.name ?? (signedIn ? label : t('more'))}</span>}
+      </button>}
+      items={[
+        { id: 'settings', label: t('settings'), icon: <IconSettingsOutlineMedium size={16} />,
+          ...(settingsShortcut === undefined ? {} : { shortcut: settingsShortcut }) },
+        { id: 'contact', label: t('contactUs'), icon: <IconPaperPlaneOutlineMedium size={16} /> },
+        platformAccount
+          ? { id: 'platform-signout', label: t('platformSignOut'), icon: <LogoutIcon /> }
+          : { id: 'platform-signin', label: t('platformSignIn'), icon: <IconUserOutlineMedium size={16} /> },
+        ...(signedIn ? [{ id: 'signout', label: t('signOut'), icon: <LogoutIcon />, disabled: busy }]
+          : [{ id: 'signin', label: t('signIn'), icon: <IconUserOutlineMedium size={16} /> }]),
+      ]}
+      onClose={() => { setOpen(false) }}
+      onSelect={(id) => {
+        if (id === 'settings') { setOpen(false); trigger.current?.focus(); openSettings() }
+        else if (id === 'contact') { setOpen(false); contactUs() }
+        else if (id === 'platform-signin') { setOpen(false); setPfErr(''); setPfLoginOpen(true) }
+        else if (id === 'platform-signout') { setOpen(false); writePlatformAccount(null) }
+        else if (id === 'signin') beginSignIn()
+        else void requestSignOut()
+      }} />
+    {account.loginVisible && !account.onboarding && <SignInDialog account={account} colorScheme={colorScheme}
+      start={start} cancel={cancel} t={t}
+      close={() => { showLogin(false) }} useApiKey={() => { showLogin(false); openOnboarding('deepseek-official') }} />}
+    {signedIn && signOutImpact !== undefined && <SignOutDialog running={signOutImpact} signOut={signOut}
+      close={() => { setSignOutImpact(undefined) }} t={t} />}
     {pfLoginOpen && !platformAccount && (
       <div style={overlayStyle} onClick={() => { setPfLoginOpen(false) }}>
-        <div style={dialogStyle} onClick={e => e.stopPropagation()}>
-          <div style={{ fontSize: 15, fontWeight: 600 }}>平台账户登录</div>
+        <div style={dialogStyle} role="dialog" aria-label={t('platformSignIn')} onClick={(e) => { e.stopPropagation() }}>
+          <div style={{ fontSize: 15, fontWeight: 500 }}>{t('platformSignIn')}</div>
           <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#8a94a6)' }}>
-            复用基础运维平台（资源性能监控平台）账号体系统一认证
+            {t('platformLoginDescription')}
           </div>
-          <input style={dlgInputStyle} placeholder="账号" value={pfName}
-            onChange={e => setPfName((e.target as HTMLInputElement).value)} />
-          <input style={dlgInputStyle} type="password" placeholder="口令" value={pfPassword}
-            onChange={e => setPfPassword((e.target as HTMLInputElement).value)}
-            onKeyDown={e => { if (e.key === 'Enter') void doPlatformLogin() }} />
-          {pfErr && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--dsw-alias-state-error-primary,#d73a49)' }}>{pfErr}</div>}
+          <input style={dlgInputStyle} placeholder={t('platformUsername')} aria-label={t('platformUsername')} value={pfName}
+            onChange={(e) => { setPfName(e.target.value) }} />
+          <input style={dlgInputStyle} type="password" placeholder={t('platformPassword')} aria-label={t('platformPassword')} value={pfPassword}
+            onChange={(e) => { setPfPassword(e.target.value) }}
+            onKeyDown={(e) => { if (e.key === 'Enter') void doPlatformLogin() }} />
+          {pfErr && <div role="alert" style={{ marginTop: 8, fontSize: 12, color: 'var(--dsw-alias-state-error-primary,#d73a49)' }}>{pfErr}</div>}
           <button type="button" style={dlgBtnStyle} disabled={pfBusy} onClick={() => void doPlatformLogin()}>
-            {pfBusy ? '登录中…' : '登录'}
+            {pfBusy ? t('platformLoggingIn') : t('signIn')}
           </button>
         </div>
       </div>

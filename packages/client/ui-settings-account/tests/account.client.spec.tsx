@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, act, within } from '@testing-librar
 import { useMemo, useSyncExternalStore } from 'react'
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest'
 import type { GlobalStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
-import type { AccountDetails, AccountView, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
+import type { AccountDetails, AccountUserId, AccountView, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
 import type { ThemeSnapshot } from '@deepseek-ai/dsh-client-ui-theme/client'
 import type { PlatformBridge } from '../src/client/PlatformOverlay.tsx'
 import { createPlatformPages, type PlatformPages } from '../src/client/platform-pages.ts'
@@ -16,7 +16,7 @@ import { en, zh, type AccountKey } from '../src/client/locales.ts'
 import css from '../src/client/AccountSection.module.css'
 import type { AccountAvatarSnapshot } from '../src/client/account-avatar.ts'
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.removeItem('aiops.account') })
 
 /** One resolved theme snapshot per scheme; the slot's theme hook serves these in the application. */
 const themeOf = (colorScheme: 'light' | 'dark'): ThemeSnapshot => ({
@@ -134,7 +134,7 @@ it.each([en, zh].flatMap(copy => ([false, true, 'unknown'] as const).map(running
     useTheme={selector => selector(operations.hooks.theme.getSnapshot())} wide openOnboarding={() => {}} openSettings={openSettings}
     t={key => key in copy ? copy[key as AccountKey] : key} />)
   fireEvent.click(screen.getByRole('button', { name: copy.menu }))
-  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([copy.settings, copy.contactUs, copy.signOut])
+  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([copy.settings, copy.contactUs, copy.platformSignIn, copy.signOut])
   await expect(`${screen.getByRole('menu').textContent}\n`).toMatchFileSnapshot(`./expected/menu-${copy === en ? 'en' : 'zh'}.txt`)
   fireEvent.click(screen.getByRole('menuitem', { name: copy.settings }))
   expect(openSettings).toHaveBeenCalledOnce()
@@ -180,7 +180,7 @@ it.each([en, zh])('updates the Settings menu keycaps and accessible combination 
   expect(props.openSettings).toHaveBeenCalledOnce()
 })
 
-it.each([en, zh])('offers settings, contact and sign-in from the signed-out account menu', async (copy) => {
+it.each([en, zh])('offers settings, contact and both sign-in methods from the signed-out account menu', async (copy) => {
   const openSettings = vi.fn()
   const operations = operationsOf({ status: 'signed-out', attempt: null })
   const { AccountMenu } = await import('../src/client/AccountMenu.tsx')
@@ -192,13 +192,74 @@ it.each([en, zh])('offers settings, contact and sign-in from the signed-out acco
   expect(trigger.textContent).toBe(copy.more)
   expect(trigger.querySelector('svg')).not.toBeNull()
   fireEvent.click(trigger)
-  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([copy.settings, copy.contactUs, copy.signIn])
+  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([copy.settings, copy.contactUs, copy.platformSignIn, copy.signIn])
   await expect(`${screen.getByRole('menu').textContent}\n`).toMatchFileSnapshot(`./expected/menu-signed-out-${copy === en ? 'en' : 'zh'}.txt`)
   fireEvent.click(screen.getByRole('menuitem', { name: copy.settings }))
   expect(openSettings).toHaveBeenCalledOnce()
   fireEvent.click(screen.getByRole('button', { name: copy.menu }))
   fireEvent.click(screen.getByRole('menuitem', { name: copy.contactUs }))
   expect(operations.contactUs).toHaveBeenCalledOnce()
+})
+
+it('keeps DeepSeek sign-in available when the operations platform is unreachable', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed') }))
+  const operations = operationsOf({ status: 'signed-out', attempt: null })
+  const { AccountMenu } = await import('../src/client/AccountMenu.tsx')
+  render(<AccountMenu {...({} as GlobalStandardProps)} {...operations} settingsOpen={false}
+    useAccount={selector => selector(operations.hooks.account.getSnapshot())}
+    useTheme={selector => selector(operations.hooks.theme.getSnapshot())} wide openOnboarding={() => {}} openSettings={() => {}}
+    t={key => en[key as AccountKey]} />)
+  fireEvent.click(screen.getByRole('button', { name: en.menu }))
+  fireEvent.click(screen.getByRole('menuitem', { name: en.platformSignIn }))
+  const dialog = screen.getByRole('dialog', { name: en.platformSignIn })
+  fireEvent.change(within(dialog).getByRole('textbox', { name: en.platformUsername }), { target: { value: 'operator' } })
+  fireEvent.change(within(dialog).getByLabelText(en.platformPassword), { target: { value: 'secret' } })
+  await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: en.signIn })) })
+  expect(within(dialog).getByRole('alert').textContent).toBe(en.platformUnavailable)
+  fireEvent.click(dialog.parentElement!)
+  fireEvent.click(screen.getByRole('button', { name: en.menu }))
+  await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: en.signIn })) })
+  expect(operations.start).toHaveBeenCalledOnce()
+})
+
+it('shows the operations account in the unified launcher and signs out without signing out of DeepSeek', async () => {
+  localStorage.setItem('aiops.account', JSON.stringify({ name: 'operator', role: 2 }))
+  const operations = operationsOf({ status: 'credential-stored', attempt: null })
+  const { AccountMenu } = await import('../src/client/AccountMenu.tsx')
+  render(<AccountMenu {...({} as GlobalStandardProps)} {...operations} settingsOpen={false}
+    useAccount={selector => selector(operations.hooks.account.getSnapshot())}
+    useTheme={selector => selector(operations.hooks.theme.getSnapshot())} wide openOnboarding={() => {}} openSettings={() => {}}
+    t={key => en[key as AccountKey]} />)
+  expect(screen.getByRole('button', { name: en.menu }).textContent).toBe('Ooperator')
+  fireEvent.click(screen.getByRole('button', { name: en.menu }))
+  fireEvent.click(screen.getByRole('menuitem', { name: en.platformSignOut }))
+  expect(operations.signOut).not.toHaveBeenCalled()
+  expect(localStorage.getItem('aiops.account')).toBeNull()
+  expect(screen.getByRole('button', { name: en.menu }).textContent).toBe('')
+  fireEvent.click(screen.getByRole('button', { name: en.menu }))
+  expect(screen.getByRole('menuitem', { name: en.platformSignIn })).toBeTruthy()
+  expect(screen.getByRole('menuitem', { name: en.signOut })).toBeTruthy()
+})
+
+it('switches the unified launcher to the DeepSeek account after sign-in succeeds', async () => {
+  localStorage.setItem('aiops.account', JSON.stringify({ name: 'operator', role: 2 }))
+  const operations = operationsOf({ status: 'signed-out', attempt: null })
+  const { AccountMenu } = await import('../src/client/AccountMenu.tsx')
+  const links = { usageUrl: 'http://localhost:8081/usage', topUpUrl: 'http://localhost:8081/top_up' }
+  const snapshot: AccountSnapshot = { view: { status: 'signed-out', attempt: null, links }, details: undefined, avatar: undefined, failed: false }
+  const props: AccountMenuProps = {
+    ...({} as GlobalStandardProps), ...operations, settingsOpen: false,
+    useAccount: selector => selector(snapshot),
+    useTheme: selector => selector(operations.hooks.theme.getSnapshot()), wide: true,
+    openOnboarding: () => {}, openSettings: () => {}, t: key => en[key as AccountKey],
+  }
+  const view = render(<AccountMenu {...props} />)
+  expect(screen.getByRole('button', { name: en.menu }).textContent).toBe('Ooperator')
+  snapshot.view = { status: 'credential-stored', attempt: { id: 'attempt' as SignInAttemptId, phase: 'succeeded' }, links }
+  snapshot.details = { profile: { status: 'ready', value: { id: 'deepseek-user' as AccountUserId, name: 'DeepSeek User', contact: null, avatarUrl: null } } }
+  await act(async () => { view.rerender(<AccountMenu {...props} />) })
+  expect(screen.getByRole('button', { name: en.menu }).textContent).toBe('DeepSeek User')
+  expect(localStorage.getItem('aiops.account')).toBeNull()
 })
 
 it('reports a failed start in the login dialog, not as a sidebar alert', async () => {

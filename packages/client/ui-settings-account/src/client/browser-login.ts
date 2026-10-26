@@ -27,11 +27,15 @@ export class BrowserLogin {
     }
   }
 
-  /** Preopen a tab during the user's click; blocked popups need the copy-link route. */
+  /** Preopen a tab during the user's click; blocked or rejected popups need the copy-link route. */
   begin(): void {
     this.dispose()
-    this.popup = window.open('about:blank', '_blank')
-    if (this.popup) this.popup.opener = null
+    try {
+      this.popup = window.open('about:blank', '_blank')
+      if (this.popup) this.popup.opener = null
+    } catch {
+      this.popup = null
+    }
   }
 
   /**

@@ -14,7 +14,7 @@ function dialogProps(attempt: AccountView['attempt'], copy: typeof en | typeof z
   const close = vi.fn()
   const useApiKey = vi.fn()
   return { start, cancel, close, useApiKey, colorScheme, t: (key: keyof typeof en) => copy[key],
-    account: { view: { status: 'signed-out' as const, attempt, links: { usageUrl: 'https://platform.deepseek.com/usage', topUpUrl: 'https://platform.deepseek.com/top_up' } }, details: undefined, avatar: undefined, failed: false } }
+    account: { view: { status: 'signed-out' as const, attempt, links: { usageUrl: 'https://platform.deepseek.com/usage', topUpUrl: 'https://platform.deepseek.com/top_up' } }, details: undefined, avatar: undefined, failed: false, loginFailed: false } }
 }
 function mount(attempt: AccountView['attempt'], copy: typeof en | typeof zh = en, colorScheme: 'light' | 'dark' = 'dark') {
   const props = dialogProps(attempt, copy, colorScheme)
@@ -138,7 +138,7 @@ it.each([en, zh])('shows an error during an active attempt and waits for cancell
   fireEvent.click(screen.getByRole('button', { name: copy.retry }))
   expect(props.cancel).toHaveBeenCalledExactlyOnceWith(id)
   expect(props.start).not.toHaveBeenCalled()
-  expect(screen.getByRole('button', { name: copy.retry }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByRole('button', { name: copy.waiting }).hasAttribute('disabled')).toBe(true)
   await act(async () => { cancelled.resolve(undefined); await cancelled.promise })
   expect(props.start).toHaveBeenCalledOnce()
 })
@@ -177,6 +177,20 @@ it('keeps an outstanding start open until the request settles', async () => {
   expect(props.close).not.toHaveBeenCalled()
   await act(async () => { pending.resolve(undefined); await pending.promise })
   expect(screen.getByRole('button', { name: en.signIn }).hasAttribute('disabled')).toBe(false)
+})
+
+it('shows retry progress instead of the previous failure while start is pending', async () => {
+  const props = mount(null)
+  cleanup()
+  props.account.loginFailed = true
+  const pending = Promise.withResolvers<undefined>()
+  props.start.mockReturnValueOnce(pending.promise)
+  render(<SignInDialog {...props} />)
+  fireEvent.click(screen.getByRole('button', { name: en.retry }))
+  expect(screen.getByRole('dialog', { name: en.browserTitle })).toBeTruthy()
+  expect(screen.getByRole('button', { name: en.waiting }).hasAttribute('disabled')).toBe(true)
+  await act(async () => { pending.resolve(undefined); await pending.promise })
+  expect(screen.getByRole('dialog', { name: en.failureTitle })).toBeTruthy()
 })
 
 // Workspace login remains outside native welcome analytics even if a caller forwards a sender.

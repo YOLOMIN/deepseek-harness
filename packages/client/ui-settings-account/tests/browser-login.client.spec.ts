@@ -57,6 +57,15 @@ it('retains the manual link route when popup opening is blocked', () => {
   expect(() => { browser.follow(view('waiting-browser', 'https://platform.deepseek.com/dsh/authorize')) }).not.toThrow()
 })
 
+it('continues the Host login when popup opening throws', async () => {
+  vi.spyOn(window, 'open').mockImplementation(() => { throw new Error('popup rejected') })
+  const browser = new BrowserLogin(url => url)
+  const request = vi.fn(async () => view('initializing'))
+  await browser.start(request, () => undefined)
+  expect(request).toHaveBeenCalledOnce()
+  expect(() => { browser.follow(view('waiting-browser', 'https://platform.deepseek.com/dsh/authorize')) }).not.toThrow()
+})
+
 it('closes the pending tab when the authenticated start request rejects', async () => {
   const { browser, close, replace } = setup()
   close.mockClear()
