@@ -73,6 +73,8 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/credentials/deepseek-account-platform': { kind: 'none', reason: 'Account authorization registers no model context or tools; credentials affect HTTP authentication only.' },
   'packages/api/account-controller': { kind: 'none', reason: 'Account authorization registers no model context or tools; credentials affect HTTP authentication only.' },
   'packages/client/ui-settings-account': { kind: 'none', reason: 'Account authorization registers no model context or tools; credentials affect HTTP authentication only.' },
+  'packages/aiops/ui-console': { kind: 'none', reason: 'The operations console contributes UI and routes Session entry; presets own every prompt and tool effect.' },
+  'packages/aiops/auth-relay': { kind: 'indirect', reason: 'Copilot forwards requests to the normal headless profile, whose persona and tools own the model-visible context.' },
 
   'packages/attachment/attachment': { kind: 'indirect', reason: 'The storage seam delegates model request rendering to provider adapters.' },
   'packages/attachment/attachment-local': { kind: 'indirect', reason: 'The local backend delegates model request rendering to provider adapters.' },

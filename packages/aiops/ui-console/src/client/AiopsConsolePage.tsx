@@ -7,6 +7,7 @@
  */
 import { useEffect, useState } from 'react'
 import { closeConsolePanel, consumeInitialTab } from './initial-tab.ts'
+import type { AiopsLocaleKey } from './locales.ts'
 import {
   IconDatabaseOutlineRegular,
   IconSkillOutlineRegular,
@@ -55,7 +56,7 @@ function Tag({ color, children }: { color: string; children: unknown }) {
   )
 }
 
-function Btn({ primary, danger, onClick, children }: { primary?: boolean; danger?: boolean; onClick?: () => void; children: unknown }) {
+function Btn({ primary, danger, onClick, children }: { primary?: boolean; danger?: boolean; onClick?: (() => void) | undefined; children: unknown }) {
   return (
     <button onClick={onClick} style={{
       fontSize: 12, cursor: 'pointer', borderRadius: 6, padding: '3px 10px', whiteSpace: 'nowrap',
@@ -551,11 +552,6 @@ function toConsoleRole(role: number): Role {
   return role === 1 ? 'admin' : 'os'
 }
 
-const inputStyle: Record<string, unknown> = {
-  fontSize: 12, borderRadius: 6, padding: '4px 8px', width: 110,
-  border: `1px solid ${V.border}`, background: 'transparent', color: V.text, outline: 'none',
-}
-
 /** 平台账户共享状态：localStorage 键 + 窗口事件，与左下角账户组件（ui-settings-account）共用。 */
 const PLATFORM_KEY = 'aiops.account'
 const PLATFORM_EVENT = 'aiops-account'
@@ -568,7 +564,7 @@ function readPlatformAccount(): Account | null {
 }
 
 /** 控制台主页：六模块页签 + 卡片式内容区；账户体系统一在左下角（ui-settings-account 平台账户模式）。 */
-export function AiopsConsolePage(props: { t?: (key: string) => string }) {
+export function AiopsConsolePage(props: { t?: (key: AiopsLocaleKey) => string }) {
   const { t } = props
   // 初始页签：平台入口页跳转指定（pf_tab Cookie → consumeInitialTab），默认智能体管理
   const [tab, setTab] = useState<TabKey>(() => {

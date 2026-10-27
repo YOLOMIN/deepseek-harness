@@ -5,8 +5,13 @@ import type {} from '@deepseek-ai/dsh-settings'
 import { type ContactConfig, ContactConfigFields, CONTACT_CONFIG_GLOBAL } from './contact-config.ts'
 import z from '@deepseek-ai/schemastery'
 import { OnboardingSettingsFields, type OnboardingStep, type OnboardingPurpose, type OnboardingProcess } from './onboarding-settings.ts'
+import { OperationsPlatformsFormFields } from './operations-platform.ts'
 /** Public contact options and live device-local onboarding progress. */
 export interface Config extends ContactConfig {
+  /** JSON-encoded operations authentication adapters. */
+  operationsPlatformsJson: Volatile<string>
+  /** Provider selected for new operations login and ticket flows. */
+  defaultPlatformId: Volatile<string>
   /** Onboarding progress format version. */
   version: Volatile<1>
   /** Last accepted onboarding page. */
@@ -29,6 +34,8 @@ export const Config = z.object({
   contactSource: ContactConfigFields.contactSource,
   bonusAckRetryDelayMs: ContactConfigFields.bonusAckRetryDelayMs,
   bonusAckRetryMaxDelayMs: ContactConfigFields.bonusAckRetryMaxDelayMs,
+  operationsPlatformsJson: OperationsPlatformsFormFields.operationsPlatformsJson.volatile(),
+  defaultPlatformId: OperationsPlatformsFormFields.defaultPlatformId.volatile(),
   version: OnboardingSettingsFields.version.volatile(),
   step: OnboardingSettingsFields.step.volatile(),
   purpose: OnboardingSettingsFields.purpose.volatile(),

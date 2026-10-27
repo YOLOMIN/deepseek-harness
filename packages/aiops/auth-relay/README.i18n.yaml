@@ -1,0 +1,31 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/aiops/auth-relay/README.md
+/:
+  en: 5f6d9b3b9b337462
+  zh: f1dbb2188eb9955e
+/gac2-dsh-aiops-auth-relay:
+  en: 793b2d2ad711ccbf
+  zh: 12387864ba3af228
+/gac2-dsh-aiops-auth-relay/summary:
+  en: 8975eaa156d6cd78
+  zh: 5d9c7589a4520faf
+/gac2-dsh-aiops-auth-relay/table-of-contents:
+  en: af856ba79fe31b8e
+  zh: 15b7d1a5d1856de2
+/gac2-dsh-aiops-auth-relay/use-this-package:
+  en: e18a523644984eab
+  zh: d4185f7ad1913aa0
+/gac2-dsh-aiops-auth-relay/model-experience:
+  en: 85206249e4ffcefc
+  zh: 8f5564f361c43745
+/gac2-dsh-aiops-auth-relay/model-experience/kv-cache-effect:
+  en: 8c5886e903b7e450
+  zh: 1f30f42fe6b735b6
+/gac2-dsh-aiops-auth-relay/known-limitations-and-deferred-work:
+  en: d8aa3391ca4682a5
+  zh: c9d574e610bcdc87
+/gac2-dsh-aiops-auth-relay/known-limitations-and-deferred-work/dev-note:
+  en: 77d07e046bc30906
+  zh: 5067d3dd24b66a99

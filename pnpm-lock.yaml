@@ -1213,6 +1213,24 @@ importers:
         specifier: workspace:*
         version: link:../../interaction/user-approval
 
+  packages/aiops/auth-relay:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-credentials':
+        specifier: workspace:*
+        version: link:../../credentials/credentials
+      '@deepseek-ai/dsh-credentials-local':
+        specifier: workspace:*
+        version: link:../../credentials/credentials-local
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: workspace:*
+        version: link:../../host/webserver
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+
   packages/aiops/ui-console:
     devDependencies:
       '@deepseek-ai/cordis':
@@ -3111,6 +3129,9 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
+      '@gac2/dsh-aiops-auth-relay':
+        specifier: workspace:*
+        version: link:../../aiops/auth-relay
       '@gac2/dsh-client-ui-aiops':
         specifier: workspace:*
         version: link:../../aiops/ui-console

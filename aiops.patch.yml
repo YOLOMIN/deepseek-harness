@@ -2,6 +2,28 @@
 # 并声明 OS 智能体预设（Web 会话默认挂载）；headless 链路（运维 Copilot）
 # 无预设机制，身份经 system-prompt 的 personaPrefix 注入。
 - insert:
+    # 集成中继：独立 3081 webServer，与主 Web 3080 共享 DSH 生命周期。
+    # 仅保留控制台跳转（token 注入与免登票据透传）与 Copilot 流式通道；
+    # 平台账户认证适配由运维平台标准接口 /api/aiops/* 直接提供。
+    - id: aiops-auth-relay-group
+      name: cordis:group
+      group: true
+      isolate:
+        webServer: true
+      config:
+        - id: aiops-relay-webserver
+          name: '@deepseek-ai/dsh-host-webserver'
+          config:
+            host: 127.0.0.1
+            port: 3081
+        - id: aiops-auth-relay
+          name: '@gac2/dsh-aiops-auth-relay'
+          config:
+            platformOrigin: http://192.168.10.95:9091
+            dshRoot: .
+            sessionCwd: .
+            consoleLogPath: ../dsh-web.log
+
     - id: aiops-console
       name: '@gac2/dsh-client-ui-aiops'
 

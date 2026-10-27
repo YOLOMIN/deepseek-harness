@@ -1,0 +1,31 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/aiops/ui-console/README.md
+/:
+  en: b8f2419a310768b8
+  zh: e110827d5f396a89
+/gac2-dsh-client-ui-aiops:
+  en: f7b3f77ae7dad973
+  zh: d7675c1d1a2f56e2
+/gac2-dsh-client-ui-aiops/summary:
+  en: a2d1aea7acfc148e
+  zh: 7f117a55d7115bbd
+/gac2-dsh-client-ui-aiops/table-of-contents:
+  en: af856ba79fe31b8e
+  zh: 15b7d1a5d1856de2
+/gac2-dsh-client-ui-aiops/use-this-package:
+  en: 0683eb2d24b3166f
+  zh: 3dd4314af667a7cf
+/gac2-dsh-client-ui-aiops/model-experience:
+  en: c8acff50051c5ca3
+  zh: a786367f6005207d
+/gac2-dsh-client-ui-aiops/model-experience/kv-cache-effect:
+  en: ca3015e252db0114
+  zh: 6000b452cc4d0574
+/gac2-dsh-client-ui-aiops/known-limitations-and-deferred-work:
+  en: e4cedcce321842d1
+  zh: b35b2a925a0c3f80
+/gac2-dsh-client-ui-aiops/known-limitations-and-deferred-work/dev-note:
+  en: c4db5de59cd64d01
+  zh: 48ad5bcfe7814f0d

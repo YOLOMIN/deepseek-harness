@@ -5,6 +5,8 @@ import { Button, IconRightUpOutlineRegular } from '@deepseek-ai/dsh-client-ui-pr
 import type { AccountDetails, AccountView, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
 import type { PropsRuntime, PropsLocale, InjectFace, HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ThemeSnapshot } from '@deepseek-ai/dsh-client-ui-theme/client'
+import type { ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { OperationsPlatformsConfig, OperationsPlatformsFormValue } from '../operations-platform.ts'
 import type { PlatformPage, PlatformPages } from './platform-pages.ts'
 import { formatBalance } from './formatBalance.ts'
 import { AccountAvatar } from './AccountAvatar.tsx'
@@ -60,7 +62,11 @@ export interface AccountSectionInjected {
     account: HostObservable<AccountSnapshot>
     /** Palette the Platform login pages follow. */
     theme: HostObservable<ThemeSnapshot>
+    /** Live operations adapter configuration shared by the launcher and settings editor. */
+    platforms: HostObservable<ConfigFormSnapshot<OperationsPlatformsFormValue>>
   }
+  /** Persist a complete operations platform list and its default selection atomically. */
+  savePlatforms: (value: OperationsPlatformsConfig) => Promise<boolean>
   /**
    * Retry a failed avatar and read the profile, balance, bonus wallets and unnotified bonus once. The Settings launcher
    * calls it on each entry, and a page opener on return from top-up.

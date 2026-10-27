@@ -54,13 +54,14 @@ export function apply(ctx: ClientContext): void {
   // 面板注册完成后延迟读取并清除 Cookie，打开控制台面板（会话管理跳转为会话主界面，不打开面板）。
   ctx.effect(() => {
     const m = /(?:^|;\s*)pf_tab=([a-z]+)/.exec(document.cookie)
-    if (!m) return
+    if (!m) return () => undefined
     document.cookie = 'pf_tab=; Path=/; Max-Age=0'
     const tab = m[1]
-    if (tab === 'sessions') return
+    if (!tab || tab === 'sessions') return () => undefined
     setInitialTab(tab)
     setTimeout(() => {
       try { ctx.layout.selectPanel(PANEL_ID) } catch { /* 面板未就绪时忽略，用户可手动打开 */ }
     }, 0)
+    return () => undefined
   }, 'ui-aiops: initial tab')
 }

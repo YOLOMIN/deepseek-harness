@@ -4,7 +4,9 @@ import {
   Toast, Menu, IconEllipsisOutlineMedium, IconPaperPlaneOutlineMedium, IconSettingsOutlineMedium, IconUserOutlineMedium,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import { DEFAULT_OPERATIONS_PLATFORMS, operationsPlatformsFromJson } from '../operations-platform.ts'
 import type { AccountSectionInjected } from './AccountSection.tsx'
+import { operationsLogin, operationsTicketLogin, type OperationsAccount } from './operations-platform.ts'
 import { SignOutDialog } from './SignOutDialog.tsx'
 import { SignInDialog } from './SignInDialog.tsx'
 import { LogoutIcon } from './LogoutIcon.tsx'
@@ -14,47 +16,21 @@ import css from './AccountMenu.module.css'
 
 const PLATFORM_KEY = 'aiops.account'
 const PLATFORM_EVENT = 'aiops-account'
+const DEFAULT_PLATFORMS = DEFAULT_OPERATIONS_PLATFORMS
 
-interface PlatformAccount { name: string; role: number }
-
-function readPlatformAccount(): PlatformAccount | null {
+function readPlatformAccount(): OperationsAccount | null {
   try {
     const raw = localStorage.getItem(PLATFORM_KEY)
-    return raw ? JSON.parse(raw) as PlatformAccount : null
+    if (!raw) return null
+    const account = JSON.parse(raw) as OperationsAccount
+    return { ...account, providerId: account.providerId ?? 'scmms' }
   } catch { return null }
 }
 
-function writePlatformAccount(account: PlatformAccount | null): void {
+function writePlatformAccount(account: OperationsAccount | null): void {
   if (account) localStorage.setItem(PLATFORM_KEY, JSON.stringify(account))
   else localStorage.removeItem(PLATFORM_KEY)
   window.dispatchEvent(new Event(PLATFORM_EVENT))
-}
-
-const RELAY_LOGIN_URL = 'http://127.0.0.1:3081/api/aiops/login'
-const RELAY_TICKET_URL = 'http://127.0.0.1:3081/api/aiops/ticket-login'
-
-interface PlatformReply {
-  status: number | undefined
-  msg: string | undefined
-  username: string | undefined
-  role: number | undefined
-}
-
-function recordOf(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined
-}
-
-async function readPlatformReply(response: Response): Promise<PlatformReply> {
-  const body = recordOf(await response.json())
-  const data = recordOf(body?.data)
-  return {
-    status: typeof body?.status === 'number' ? body.status : undefined,
-    msg: typeof body?.msg === 'string' ? body.msg : undefined,
-    username: typeof data?.username === 'string' ? data.username : undefined,
-    role: typeof data?.role === 'number' ? data.role : undefined,
-  }
 }
 
 const overlayStyle: Record<string, string | number> = {
@@ -86,7 +62,7 @@ export type AccountMenuProps = PropsRuntime<'settings.launcher'> & PropsLocale<'
  */
 export function AccountMenu({
   subscribeSessionExpired, subscribeModelSignInRequired, wide, settingsShortcut, openSettings, openOnboarding, settingsOpen,
-  useAccount, useTheme, signOut, hasRunningAccountTasks, refreshAccount, bonusNoticeShown, bonusNoticeDismissed,
+  useAccount, useTheme, usePlatforms, signOut, hasRunningAccountTasks, refreshAccount, bonusNoticeShown, bonusNoticeDismissed,
   contactUs, showLogin, start, cancel, avatarFailed, t,
 }: AccountMenuProps) {
   const anchor = useRef<HTMLDivElement>(null)
@@ -100,6 +76,12 @@ export function AccountMenu({
   const account = useAccount(state => state)
   const colorScheme = useTheme(snapshot => snapshot.active.colorScheme)
   const signedIn = account.view?.status === 'credential-stored'
+  const platformConfig = usePlatforms(state => state)
+  const settings = platformConfig.value
+    ? operationsPlatformsFromJson(platformConfig.value.operationsPlatformsJson, platformConfig.value.defaultPlatformId)
+    : DEFAULT_PLATFORMS
+  const providers = settings.operationsPlatforms
+  const defaultProvider = providers.find(item => item.id === settings.defaultPlatformId) ?? providers[0]
   const [signInNotice, setSignInNotice] = useState(0)
   useEffect(() => subscribeModelSignInRequired?.(() => { setSignInNotice(value => value + 1) }), [subscribeModelSignInRequired])
   const [expiryNotice, setExpiryNotice] = useState(false)
@@ -111,12 +93,14 @@ export function AccountMenu({
   const trigger = useRef<HTMLButtonElement>(null)
   const [busy, setBusy] = useState(false)
   const [signOutImpact, setSignOutImpact] = useState<boolean | 'unknown'>()
-  const [platformAccount, setPlatformAccount] = useState<PlatformAccount | null>(readPlatformAccount)
+  const [platformAccount, setPlatformAccount] = useState<OperationsAccount | null>(readPlatformAccount)
   const [pfLoginOpen, setPfLoginOpen] = useState(false)
+  const [pfProviderId, setPfProviderId] = useState(DEFAULT_PLATFORMS.defaultPlatformId)
   const [pfName, setPfName] = useState('')
   const [pfPassword, setPfPassword] = useState('')
   const [pfBusy, setPfBusy] = useState(false)
   const [pfErr, setPfErr] = useState('')
+  const provider = providers.find(item => item.id === pfProviderId) ?? defaultProvider
   const deepSeekWasSignedIn = useRef(signedIn)
   useEffect(() => {
     if (signedIn && !deepSeekWasSignedIn.current) writePlatformAccount(null)
@@ -133,25 +117,23 @@ export function AccountMenu({
   }, [])
   useEffect(() => {
     const m = document.cookie.match(/(?:^|;\s*)pf_ticket=([^;]+)/)
-    if (!m) return
-    const ticket = m[1]
+    const ticket = m?.[1]
+    if (!ticket || !defaultProvider?.ticketLoginUrl) return
+    const selected = defaultProvider
     document.cookie = 'pf_ticket=; Path=/; Max-Age=0'
     void (async () => {
       try {
-        const r = await fetch(RELAY_TICKET_URL, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ticket }),
-        })
-        const reply = await readPlatformReply(r)
+        const reply = await operationsTicketLogin(selected, ticket)
         if (reply.status === 0 && reply.username && reply.role !== undefined) {
-          writePlatformAccount({ name: reply.username, role: reply.role })
+          writePlatformAccount({ name: reply.username, role: reply.role, providerId: selected.id })
         } else if (reply.status === 2 && reply.username) {
+          setPfProviderId(selected.id)
           setPfName(reply.username)
           setPfLoginOpen(true)
         }
       } catch { /* Keep both sign-in entries available when the relay is offline. */ }
     })()
-  }, [])
+  }, [defaultProvider])
   const requestSignOut = async () => {
     setBusy(true)
     try { setSignOutImpact(await hasRunningAccountTasks()); setOpen(false) }
@@ -160,17 +142,20 @@ export function AccountMenu({
   }
   // The plugin's start publishes `loginFailed` before it rejects, so the dialog owns the report.
   const beginSignIn = (): void => { setOpen(false); void start().catch(() => undefined) }
+  const openPlatformLogin = (): void => {
+    setOpen(false)
+    setPfProviderId(defaultProvider?.id ?? DEFAULT_PLATFORMS.defaultPlatformId)
+    setPfErr('')
+    setPfLoginOpen(true)
+  }
   const doPlatformLogin = async () => {
     if (!pfName || !pfPassword) { setPfErr(t('platformCredentialsRequired')); return }
+    if (!provider) { setPfErr(t('platformUnavailable')); return }
     setPfBusy(true); setPfErr('')
     try {
-      const r = await fetch(RELAY_LOGIN_URL, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: pfName, password: pfPassword }),
-      })
-      const reply = await readPlatformReply(r)
+      const reply = await operationsLogin(provider, pfName, pfPassword)
       if (reply.status === 0 && reply.role !== undefined) {
-        writePlatformAccount({ name: pfName, role: reply.role })
+        writePlatformAccount({ name: pfName, role: reply.role, providerId: provider.id })
         setPfLoginOpen(false); setPfPassword('')
       } else {
         setPfErr(reply.msg || t('platformLoginFailed'))
@@ -200,19 +185,23 @@ export function AccountMenu({
         { id: 'settings', label: t('settings'), icon: <IconSettingsOutlineMedium size={16} />,
           ...(settingsShortcut === undefined ? {} : { shortcut: settingsShortcut }) },
         { id: 'contact', label: t('contactUs'), icon: <IconPaperPlaneOutlineMedium size={16} /> },
-        platformAccount
-          ? { id: 'platform-signout', label: t('platformSignOut'), icon: <LogoutIcon /> }
-          : { id: 'platform-signin', label: t('platformSignIn'), icon: <IconUserOutlineMedium size={16} /> },
-        ...(signedIn ? [{ id: 'signout', label: t('signOut'), icon: <LogoutIcon />, disabled: busy }]
-          : [{ id: 'signin', label: t('signIn'), icon: <IconUserOutlineMedium size={16} /> }]),
+        ...(!platformAccount && !signedIn ? [{
+          id: 'signin', label: t('signIn'), icon: <IconUserOutlineMedium size={16} />,
+          submenu: [
+            { id: 'platform-signin', label: t('platformSignIn'), icon: <IconUserOutlineMedium size={16} /> },
+            { id: 'deepseek-signin', label: t('deepseekSignIn'), icon: <IconUserOutlineMedium size={16} /> },
+          ],
+        }] : []),
+        ...(platformAccount ? [{ id: 'platform-signout', label: t('platformSignOut'), icon: <LogoutIcon /> }]
+          : signedIn ? [{ id: 'signout', label: t('signOut'), icon: <LogoutIcon />, disabled: busy }] : []),
       ]}
       onClose={() => { setOpen(false) }}
       onSelect={(id) => {
         if (id === 'settings') { setOpen(false); trigger.current?.focus(); openSettings() }
         else if (id === 'contact') { setOpen(false); contactUs() }
-        else if (id === 'platform-signin') { setOpen(false); setPfErr(''); setPfLoginOpen(true) }
+        else if (id === 'platform-signin') openPlatformLogin()
         else if (id === 'platform-signout') { setOpen(false); writePlatformAccount(null) }
-        else if (id === 'signin') beginSignIn()
+        else if (id === 'deepseek-signin') beginSignIn()
         else void requestSignOut()
       }} />
     {account.loginVisible && !account.onboarding && <SignInDialog account={account} colorScheme={colorScheme}
@@ -227,6 +216,10 @@ export function AccountMenu({
           <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#8a94a6)' }}>
             {t('platformLoginDescription')}
           </div>
+          {providers.length > 1 && <select style={dlgInputStyle} aria-label={t('platformProvider')} value={provider?.id ?? pfProviderId}
+            onChange={(e) => { setPfProviderId(e.target.value) }}>
+            {providers.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>}
           <input style={dlgInputStyle} placeholder={t('platformUsername')} aria-label={t('platformUsername')} value={pfName}
             onChange={(e) => { setPfName(e.target.value) }} />
           <input style={dlgInputStyle} type="password" placeholder={t('platformPassword')} aria-label={t('platformPassword')} value={pfPassword}

@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { AccountView, AccountDetails } from '@deepseek-ai/dsh-deepseek-account/types'
+import type { OperationsPlatformsFormValue } from '../operations-platform.ts'
 import type { OnboardingChange } from './onboarding-contract.ts'
 import type { PlatformBridge } from './PlatformOverlay.tsx'
 import { ContactConfig, CONTACT_CONFIG_GLOBAL } from '../contact-config.ts'
@@ -19,6 +20,7 @@ import { BrowserLogin } from './browser-login.ts'
 import { AccountOnboarding } from './AccountOnboarding.tsx'
 import { AccountPlatformHost, type AccountPlatformHostInjected } from './AccountPlatformHost.tsx'
 import { AccountMenu } from './AccountMenu.tsx'
+import { OperationsPlatformSection } from './OperationsPlatformSection.tsx'
 import { createPlatformPages, type PlatformPages } from './platform-pages.ts'
 import { AccountSection, type AccountSnapshot, type AccountSectionInjected } from './AccountSection.tsx'
 import { createBonusNoticeController } from './bonus-notices.ts'
@@ -49,6 +51,7 @@ export function apply(ctx: Context): void {
   const t = ctx.locale.bind('settings.account')
   const page = globalThis as Partial<Record<typeof CONTACT_CONFIG_GLOBAL, unknown>>
   const config = ContactConfig(page[CONTACT_CONFIG_GLOBAL] ?? {})
+  const platformForm = ctx.configForms.get<OperationsPlatformsFormValue>('ui-settings-account')
   let snapshot: AccountSnapshot = {
     view: undefined, details: undefined, avatar: undefined, failed: false, loginVisible: false, desktopOnboardingVisible: desktop,
   }
@@ -219,7 +222,12 @@ export function apply(ctx: Context): void {
         getSnapshot: () => ctx.theme.getTheme(),
         subscribe: listener => ctx.on('theme/change', listener),
       },
+      platforms: platformForm,
     },
+    savePlatforms: value => platformForm.mutate([
+      { op: 'set', path: ['operationsPlatformsJson'], value: JSON.stringify(value.operationsPlatforms) },
+      { op: 'set', path: ['defaultPlatformId'], value: value.defaultPlatformId },
+    ]),
     async start() {
       publish({ ...snapshot, loginVisible: true, loginFailed: false })
       const transport = (globalThis as typeof globalThis & {
@@ -310,6 +318,10 @@ export function apply(ctx: Context): void {
   ctx.slots.inject('settings.launcher', () => ctx.slots.register({
     name: 'settings.launcher', locale: 'settings.account', inject: () => operations,
   }, AccountMenu))
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section', id: 'operations-platforms', order: -9,
+    label: () => t('operationsNav'), locale: 'settings.account', inject: () => operations,
+  }, OperationsPlatformSection))
   ctx.slots.inject('settings.section', () => {
     let unregister: (() => void) | undefined
     const update = () => {

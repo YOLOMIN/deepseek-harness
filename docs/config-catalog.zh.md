@@ -559,11 +559,15 @@ export interface Config {
 ## `@deepseek-ai/dsh-client-ui-settings-account`
 
 - `refs`: `Volatile` (`@deepseek-ai/cordis`)
-- `source`: [`packages/client/ui-settings-account/src/index.ts:9`](../packages/client/ui-settings-account/src/index.ts)
+- `source`: [`packages/client/ui-settings-account/src/index.ts:10`](../packages/client/ui-settings-account/src/index.ts)
 
 ```ts config-catalog
 /** Public contact options and live device-local onboarding progress. */
 export interface Config extends ContactConfig {
+  /** JSON-encoded operations authentication adapters. */
+  operationsPlatformsJson: Volatile<string>
+  /** Provider selected for new operations login and ticket flows. */
+  defaultPlatformId: Volatile<string>
   /** Onboarding progress format version. */
   version: Volatile<1>
   /** Last accepted onboarding page. */
@@ -4699,6 +4703,7 @@ export interface Config {
 | `@deepseek-ai/dsh-user-questions` | — | [`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts) |
 | `@deepseek-ai/dsh-webhook` | `agents` · `agentDefaultModel` · `agentPresets` · `permissionPresets` · `sessionTitle` · `workspaceRegistry` | [`packages/experimental/webhook/src/index.ts`](../packages/experimental/webhook/src/index.ts) |
 | `@deepseek-ai/dsh-workspace` | `storageDomain` · `sessionPersistence` | [`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts) |
+| `@gac2/dsh-client-ui-aiops` | — | [`packages/aiops/ui-console/src/index.ts`](../packages/aiops/ui-console/src/index.ts) |
 <!-- END GENERATED config-catalog:no-config -->
 
 ## Seam 包（不可直接加载）

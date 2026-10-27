@@ -1,0 +1,20 @@
+.section { display: grid; gap: 16px; }
+.intro { display: grid; gap: 4px; }
+.title { margin: 0; color: var(--dsw-alias-label-primary); font-size: 18px; font-weight: 500; }
+.description { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 1.6; }
+.card { display: grid; gap: 14px; padding: 16px; border: 1px solid var(--dsw-alias-border-l); border-radius: var(--dsw-radius-md); background: var(--dsw-alias-bg-module-platform); }
+.cardHeader, .healthRow, .actions { display: flex; align-items: center; gap: 10px; }
+.defaultChoice { display: flex; align-items: center; gap: 6px; color: var(--dsw-alias-label-primary); font-size: 13px; }
+.cardHeader .defaultChoice { flex: 1; }
+.fields { display: grid; gap: 12px; }
+.field { display: grid; gap: 5px; color: var(--dsw-alias-label-secondary); font-size: 13px; }
+.field input { box-sizing: border-box; width: 100%; padding: 7px 9px; border: 1px solid var(--dsw-alias-border-l); border-radius: var(--dsw-radius-md); background: transparent; color: var(--dsw-alias-label-primary); font: inherit; }
+.field input[readonly] { color: var(--dsw-alias-label-tertiary); }
+.healthRow .index { margin-left: auto; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.actions { justify-content: flex-end; }
+.success { color: var(--dsw-alias-state-success-primary); font-size: 13px; }
+.error { color: var(--dsw-alias-state-error-primary); font-size: 13px; }
+@media (max-width: 600px) {
+  .cardHeader, .healthRow, .actions { flex-wrap: wrap; }
+  .healthRow .index { margin-left: 0; }
+}

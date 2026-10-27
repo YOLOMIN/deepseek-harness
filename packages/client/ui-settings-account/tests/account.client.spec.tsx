@@ -13,6 +13,7 @@ import type { BonusNotice } from '../src/client/bonus-notices.ts'
 import type { AccountMenuProps } from '../src/client/AccountMenu.tsx'
 import type {} from '../src/client/index.ts'
 import { en, zh, type AccountKey } from '../src/client/locales.ts'
+import { DEFAULT_OPERATIONS_PLATFORMS, OperationsPlatformsConfig } from '../src/operations-platform.ts'
 import css from '../src/client/AccountSection.module.css'
 import type { AccountAvatarSnapshot } from '../src/client/account-avatar.ts'
 
@@ -34,7 +35,15 @@ function operationsOf(state: Omit<AccountView, 'links'>, details?: Partial<Accou
         subscribe: () => () => {},
       },
       theme: { getSnapshot: () => themeOf('light'), subscribe: () => () => {} },
+      platforms: {
+        getSnapshot: () => ({
+          status: 'ready', base: undefined, user: undefined, revision: 1, writable: true,
+          value: { operationsPlatformsJson: JSON.stringify(OperationsPlatformsConfig({}).operationsPlatforms), defaultPlatformId: 'scmms' },
+        }),
+        subscribe: () => () => {},
+      },
     },
+    savePlatforms: vi.fn(async () => true),
     hasRunningAccountTasks: vi.fn(async () => false),
     contactUs: vi.fn(), showLogin: vi.fn(), setOnboarding: vi.fn(),
     bonusNoticeShown: vi.fn(), bonusNoticeDismissed: vi.fn(),
@@ -54,6 +63,7 @@ function mount(state: Omit<AccountView, 'links'>, copy: typeof en | typeof zh = 
     <AccountSection {...globals} {...operations}
       useAccount={selector => selector(operations.hooks.account.getSnapshot())}
       useTheme={selector => selector(operations.hooks.theme.getSnapshot())}
+      usePlatforms={selector => selector(operations.hooks.platforms.getSnapshot())}
       close={() => {}} t={key => key in copy ? copy[key as AccountKey] : key} />
     {/* The application renders this from `shell.overlay`; the settings page only requests a page. */}
     {platform !== undefined && pages !== undefined
@@ -98,6 +108,7 @@ async function accountMenu(operations: AccountSectionInjected, snapshot: () => A
   return <AccountMenu {...({} as GlobalStandardProps)} {...operations}
     settingsOpen={settingsOpen} useAccount={selector => selector(snapshot())} wide
     useTheme={selector => selector(operations.hooks.theme.getSnapshot())}
+    usePlatforms={selector => selector(operations.hooks.platforms.getSnapshot())}
     openOnboarding={() => {}} openSettings={() => {}} t={key => en[key as AccountKey]} />
 }
 
@@ -131,10 +142,11 @@ it.each([en, zh].flatMap(copy => ([false, true, 'unknown'] as const).map(running
   render(<AccountMenu {...({} as GlobalStandardProps)} {...operations} settingsOpen={false} signOut={signOut}
     hasRunningAccountTasks={async () => { if (running === 'unknown') throw new Error('offline'); return running }}
     useAccount={selector => selector(operations.hooks.account.getSnapshot())}
-    useTheme={selector => selector(operations.hooks.theme.getSnapshot())} wide openOnboarding={() => {}} openSettings={openSettings}
+    useTheme={selector => selector(operations.hooks.theme.getSnapshot())}
+    usePlatforms={selector => selector(operations.hooks.platforms.getSnapshot())} wide openOnboarding={() => {}} openSettings={openSettings}
     t={key => key in copy ? copy[key as AccountKey] : key} />)
   fireEvent.click(screen.getByRole('button', { name: copy.menu }))
-  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([copy.settings, copy.contactUs, copy.platformSignIn, copy.signOut])
+  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([copy.settings, copy.contactUs, copy.signOut])
   await expect(`${screen.getByRole('menu').textContent}\n`).toMatchFileSnapshot(`./expected/menu-${copy === en ? 'en' : 'zh'}.txt`)
   fireEvent.click(screen.getByRole('menuitem', { name: copy.settings }))
   expect(openSettings).toHaveBeenCalledOnce()
@@ -159,6 +171,7 @@ it.each([en, zh])('updates the Settings menu keycaps and accessible combination 
     ...({} as GlobalStandardProps), ...operations, wide: true, settingsOpen: false,
     useAccount: selector => selector(operations.hooks.account.getSnapshot()),
     useTheme: selector => selector(operations.hooks.theme.getSnapshot()),
+    usePlatforms: selector => selector(operations.hooks.platforms.getSnapshot()),
     openSettings: vi.fn(() => { expect(document.activeElement).toBe(screen.getByRole('button', { name: copy.menu })) }),
     openOnboarding: vi.fn(),
     t: key => key in copy ? copy[key as AccountKey] : key,
@@ -186,14 +199,18 @@ it.each([en, zh])('offers settings, contact and both sign-in methods from the si
   const { AccountMenu } = await import('../src/client/AccountMenu.tsx')
   render(<AccountMenu {...({} as GlobalStandardProps)} {...operations} settingsOpen={false}
     useAccount={selector => selector(operations.hooks.account.getSnapshot())}
-    useTheme={selector => selector(operations.hooks.theme.getSnapshot())} wide openOnboarding={() => {}} openSettings={openSettings}
+    useTheme={selector => selector(operations.hooks.theme.getSnapshot())}
+    usePlatforms={selector => selector(operations.hooks.platforms.getSnapshot())} wide openOnboarding={() => {}} openSettings={openSettings}
     t={key => key in copy ? copy[key as AccountKey] : key} />)
   const trigger = screen.getByRole('button', { name: copy.menu })
   expect(trigger.textContent).toBe(copy.more)
   expect(trigger.querySelector('svg')).not.toBeNull()
   fireEvent.click(trigger)
-  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([copy.settings, copy.contactUs, copy.platformSignIn, copy.signIn])
+  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([copy.settings, copy.contactUs, copy.signIn])
   await expect(`${screen.getByRole('menu').textContent}\n`).toMatchFileSnapshot(`./expected/menu-signed-out-${copy === en ? 'en' : 'zh'}.txt`)
+  fireEvent.click(screen.getByRole('menuitem', { name: copy.signIn }))
+  expect(screen.getByRole('menuitem', { name: copy.platformSignIn })).toBeTruthy()
+  expect(screen.getByRole('menuitem', { name: copy.deepseekSignIn })).toBeTruthy()
   fireEvent.click(screen.getByRole('menuitem', { name: copy.settings }))
   expect(openSettings).toHaveBeenCalledOnce()
   fireEvent.click(screen.getByRole('button', { name: copy.menu }))
@@ -207,9 +224,11 @@ it('keeps DeepSeek sign-in available when the operations platform is unreachable
   const { AccountMenu } = await import('../src/client/AccountMenu.tsx')
   render(<AccountMenu {...({} as GlobalStandardProps)} {...operations} settingsOpen={false}
     useAccount={selector => selector(operations.hooks.account.getSnapshot())}
-    useTheme={selector => selector(operations.hooks.theme.getSnapshot())} wide openOnboarding={() => {}} openSettings={() => {}}
+    useTheme={selector => selector(operations.hooks.theme.getSnapshot())}
+    usePlatforms={selector => selector(operations.hooks.platforms.getSnapshot())} wide openOnboarding={() => {}} openSettings={() => {}}
     t={key => en[key as AccountKey]} />)
   fireEvent.click(screen.getByRole('button', { name: en.menu }))
+  fireEvent.click(screen.getByRole('menuitem', { name: en.signIn }))
   fireEvent.click(screen.getByRole('menuitem', { name: en.platformSignIn }))
   const dialog = screen.getByRole('dialog', { name: en.platformSignIn })
   fireEvent.change(within(dialog).getByRole('textbox', { name: en.platformUsername }), { target: { value: 'operator' } })
@@ -218,8 +237,42 @@ it('keeps DeepSeek sign-in available when the operations platform is unreachable
   expect(within(dialog).getByRole('alert').textContent).toBe(en.platformUnavailable)
   fireEvent.click(dialog.parentElement!)
   fireEvent.click(screen.getByRole('button', { name: en.menu }))
-  await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: en.signIn })) })
+  fireEvent.click(screen.getByRole('menuitem', { name: en.signIn }))
+  await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: en.deepseekSignIn })) })
   expect(operations.start).toHaveBeenCalledOnce()
+})
+
+it('logs in through the selected provider and records its id in the unified launcher', async () => {
+  const operations = operationsOf({ status: 'signed-out', attempt: null })
+  operations.hooks.platforms.getSnapshot = () => ({
+    status: 'ready', base: undefined, user: undefined, revision: 1, writable: true,
+    value: {
+      defaultPlatformId: 'scmms',
+      operationsPlatformsJson: JSON.stringify([
+        ...DEFAULT_OPERATIONS_PLATFORMS.operationsPlatforms,
+        { id: 'second', name: 'Second Platform', loginUrl: 'https://second.example/login', ticketLoginUrl: '', healthUrl: '' },
+      ]),
+    },
+  })
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ status: 0, data: { role: 2 } })))
+  vi.stubGlobal('fetch', fetchMock)
+  const { AccountMenu } = await import('../src/client/AccountMenu.tsx')
+  render(<AccountMenu {...({} as GlobalStandardProps)} {...operations} settingsOpen={false}
+    useAccount={selector => selector(operations.hooks.account.getSnapshot())}
+    useTheme={selector => selector(operations.hooks.theme.getSnapshot())}
+    usePlatforms={selector => selector(operations.hooks.platforms.getSnapshot())} wide openOnboarding={() => {}} openSettings={() => {}}
+    t={key => en[key as AccountKey]} />)
+  fireEvent.click(screen.getByRole('button', { name: en.menu }))
+  fireEvent.click(screen.getByRole('menuitem', { name: en.signIn }))
+  fireEvent.click(screen.getByRole('menuitem', { name: en.platformSignIn }))
+  const dialog = screen.getByRole('dialog', { name: en.platformSignIn })
+  fireEvent.change(within(dialog).getByRole('combobox', { name: en.platformProvider }), { target: { value: 'second' } })
+  fireEvent.change(within(dialog).getByRole('textbox', { name: en.platformUsername }), { target: { value: 'operator' } })
+  fireEvent.change(within(dialog).getByLabelText(en.platformPassword), { target: { value: 'secret' } })
+  await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: en.signIn })) })
+  expect(fetchMock).toHaveBeenCalledWith('https://second.example/login', expect.objectContaining({ method: 'POST' }))
+  expect(JSON.parse(localStorage.getItem('aiops.account')!)).toMatchObject({ name: 'operator', role: 2, providerId: 'second' })
+  expect(screen.getByRole('button', { name: en.menu }).textContent).toBe('Ooperator')
 })
 
 it('shows the operations account in the unified launcher and signs out without signing out of DeepSeek', async () => {
@@ -228,16 +281,20 @@ it('shows the operations account in the unified launcher and signs out without s
   const { AccountMenu } = await import('../src/client/AccountMenu.tsx')
   render(<AccountMenu {...({} as GlobalStandardProps)} {...operations} settingsOpen={false}
     useAccount={selector => selector(operations.hooks.account.getSnapshot())}
-    useTheme={selector => selector(operations.hooks.theme.getSnapshot())} wide openOnboarding={() => {}} openSettings={() => {}}
+    useTheme={selector => selector(operations.hooks.theme.getSnapshot())}
+    usePlatforms={selector => selector(operations.hooks.platforms.getSnapshot())} wide openOnboarding={() => {}} openSettings={() => {}}
     t={key => en[key as AccountKey]} />)
   expect(screen.getByRole('button', { name: en.menu }).textContent).toBe('Ooperator')
   fireEvent.click(screen.getByRole('button', { name: en.menu }))
+  expect(screen.queryByRole('menuitem', { name: en.signIn })).toBeNull()
+  expect(screen.queryByRole('menuitem', { name: en.signOut })).toBeNull()
   fireEvent.click(screen.getByRole('menuitem', { name: en.platformSignOut }))
   expect(operations.signOut).not.toHaveBeenCalled()
   expect(localStorage.getItem('aiops.account')).toBeNull()
   expect(screen.getByRole('button', { name: en.menu }).textContent).toBe('')
   fireEvent.click(screen.getByRole('button', { name: en.menu }))
-  expect(screen.getByRole('menuitem', { name: en.platformSignIn })).toBeTruthy()
+  expect(screen.queryByRole('menuitem', { name: en.signIn })).toBeNull()
+  expect(screen.queryByRole('menuitem', { name: en.platformSignIn })).toBeNull()
   expect(screen.getByRole('menuitem', { name: en.signOut })).toBeTruthy()
 })
 
@@ -250,7 +307,8 @@ it('switches the unified launcher to the DeepSeek account after sign-in succeeds
   const props: AccountMenuProps = {
     ...({} as GlobalStandardProps), ...operations, settingsOpen: false,
     useAccount: selector => selector(snapshot),
-    useTheme: selector => selector(operations.hooks.theme.getSnapshot()), wide: true,
+    useTheme: selector => selector(operations.hooks.theme.getSnapshot()),
+    usePlatforms: selector => selector(operations.hooks.platforms.getSnapshot()), wide: true,
     openOnboarding: () => {}, openSettings: () => {}, t: key => en[key as AccountKey],
   }
   const view = render(<AccountMenu {...props} />)
@@ -275,14 +333,17 @@ it('reports a failed start in the login dialog, not as a sidebar alert', async (
   })
   const view = render(<AccountMenu {...({} as GlobalStandardProps)} {...operations} settingsOpen={false} start={start}
     useAccount={selector => selector(snapshot)} useTheme={selector => selector(operations.hooks.theme.getSnapshot())}
+    usePlatforms={selector => selector(operations.hooks.platforms.getSnapshot())}
     wide openOnboarding={() => {}} openSettings={() => {}}
     t={key => key in en ? en[key as AccountKey] : key} />)
   fireEvent.click(screen.getByRole('button', { name: en.menu }))
-  await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: en.signIn })) })
+  fireEvent.click(screen.getByRole('menuitem', { name: en.signIn }))
+  await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: en.deepseekSignIn })) })
   expect(start).toHaveBeenCalledOnce()
   expect(screen.queryByRole('alert')).toBeNull()
   view.rerender(<AccountMenu {...({} as GlobalStandardProps)} {...operations} settingsOpen={false} start={start}
     useAccount={selector => selector(snapshot)} useTheme={selector => selector(operations.hooks.theme.getSnapshot())}
+    usePlatforms={selector => selector(operations.hooks.platforms.getSnapshot())}
     wide openOnboarding={() => {}} openSettings={() => {}}
     t={key => key in en ? en[key as AccountKey] : key} />)
   expect(screen.getByRole('dialog').textContent).toContain(en.failed)
@@ -300,7 +361,8 @@ it('keeps the confirmation dialog open after a failed sign-out', async () => {
   render(<AccountMenu {...({} as GlobalStandardProps)} {...operations} settingsOpen={false}
     signOut={signOut}
     useAccount={selector => selector(operations.hooks.account.getSnapshot())}
-    useTheme={selector => selector(operations.hooks.theme.getSnapshot())} wide
+    useTheme={selector => selector(operations.hooks.theme.getSnapshot())}
+    usePlatforms={selector => selector(operations.hooks.platforms.getSnapshot())} wide
     openOnboarding={() => {}} openSettings={() => {}} t={key => key in en ? en[key as AccountKey] : key} />)
   fireEvent.click(screen.getByRole('button', { name: en.menu }))
   await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: en.signOut })) })
@@ -462,6 +524,7 @@ it.each([
   render(<AccountMenu {...({} as GlobalStandardProps)} {...operations} settingsOpen={false}
     useAccount={selector => selector(operations.hooks.account.getSnapshot())}
     useTheme={selector => selector(operations.hooks.theme.getSnapshot())}
+    usePlatforms={selector => selector(operations.hooks.platforms.getSnapshot())}
     wide openSettings={() => {}} openOnboarding={() => {}} t={key => en[key as AccountKey]} />)
   expect(screen.getByRole('button', { name: en.menu }).textContent).toBe(expected)
 })
@@ -475,6 +538,7 @@ it('shows the same shared picture outcome in settings and the sidebar', async ()
   render(<AccountMenu {...({} as GlobalStandardProps)} {...operations} settingsOpen={false}
     useAccount={selector => selector(operations.hooks.account.getSnapshot())}
     useTheme={selector => selector(operations.hooks.theme.getSnapshot())}
+    usePlatforms={selector => selector(operations.hooks.platforms.getSnapshot())}
     wide openSettings={() => {}} openOnboarding={() => {}} t={key => en[key as AccountKey]} />)
   const images = document.querySelectorAll('img')
   expect(images).toHaveLength(2)
@@ -546,7 +610,8 @@ it.each([en, zh])('shows a localized toast when the account credential expires',
   const element = <AccountMenu {...({} as GlobalStandardProps)} {...operations}
     settingsOpen={false} subscribeSessionExpired={(listener) => { expire = listener; return unsubscribe }}
     useAccount={selector => selector(operations.hooks.account.getSnapshot())}
-    useTheme={selector => selector(operations.hooks.theme.getSnapshot())} wide openOnboarding={() => {}} openSettings={() => {}}
+    useTheme={selector => selector(operations.hooks.theme.getSnapshot())}
+    usePlatforms={selector => selector(operations.hooks.platforms.getSnapshot())} wide openOnboarding={() => {}} openSettings={() => {}}
     t={key => key in copy ? copy[key as AccountKey] : key} />
   const view = render(element)
   expect(screen.queryByRole('alert')).toBeNull()
@@ -645,6 +710,8 @@ it('dismisses a collapsed menu and hands its login dialog to the API-key onboard
   const props = { ...({} as GlobalStandardProps), ...operations, wide: false, settingsOpen: false, openSettings: vi.fn(), openOnboarding,
     useAccount: <T,>(select: (value: AccountSnapshot) => T) => select(snapshot),
     useTheme: <T,>(select: (value: ThemeSnapshot) => T) => select(operations.hooks.theme.getSnapshot()),
+    usePlatforms: <T,>(select: (value: ReturnType<typeof operations.hooks.platforms.getSnapshot>) => T) =>
+      select(operations.hooks.platforms.getSnapshot()),
     t: (key: string) => en[key as AccountKey] }
   const view = render(<AccountMenu {...props} />)
   expect(screen.getByRole('button', { name: en.menu }).textContent).toBe('')
@@ -756,7 +823,8 @@ it.each([en, zh])('shows live model sign-in guidance without replaying it after 
   const element = <AccountMenu {...({} as GlobalStandardProps)} {...operations}
     settingsOpen={false}
     useAccount={selector => selector(operations.hooks.account.getSnapshot())}
-    useTheme={selector => selector(operations.hooks.theme.getSnapshot())} wide openOnboarding={() => {}} openSettings={() => {}}
+    useTheme={selector => selector(operations.hooks.theme.getSnapshot())}
+    usePlatforms={selector => selector(operations.hooks.platforms.getSnapshot())} wide openOnboarding={() => {}} openSettings={() => {}}
     t={key => key in copy ? copy[key as AccountKey] : key} />
   const view = render(element)
   expect(screen.queryByRole('alert')).toBeNull()
