@@ -97,6 +97,41 @@ describe('automation-only ACP bridge', () => {
     expect(harness.adapter.requests[0]?.messages.at(-1)?.content).toEqual([{ type: 'text', text: 'say hello' }])
   })
 
+  it('streams live text and reasoning increments under streamAssistant without committed duplicates', async () => {
+    harness = await makeBridgeHarness({
+      script: [[
+        { type: 'block-start', index: 0, blockType: 'reasoning' },
+        { type: 'reasoning-delta', index: 0, text: '思' },
+        { type: 'reasoning-delta', index: 0, text: '考' },
+        { type: 'block-end', index: 0, block: { type: 'reasoning', text: '思考' } },
+        { type: 'block-start', index: 1, blockType: 'text' },
+        { type: 'text-delta', index: 1, text: '你' },
+        { type: 'text-delta', index: 1, text: '好' },
+        { type: 'block-end', index: 1, block: { type: 'text', text: '你好' } },
+        { type: 'usage', usage: { inputTokens: 5, outputTokens: 4 } },
+        { type: 'finish', reason: { kind: 'stop' } },
+      ]],
+      config: { streamAssistant: true },
+    })
+    await harness.client.initialize({ protocolVersion: PROTOCOL_VERSION, clientCapabilities: {} })
+    const { sessionId } = await harness.client.newSession({ cwd: process.cwd(), mcpServers: [] })
+    const result = await harness.client.prompt({
+      sessionId,
+      prompt: [{ type: 'text', text: 'hi' }],
+    })
+
+    expect(result.stopReason).toBe('end_turn')
+    await vi.waitFor(() => { expect(harness!.updates.at(-1)?.sessionUpdate).toBe('usage_update') })
+    const texts = harness.updates
+      .filter(update => update.sessionUpdate === 'agent_message_chunk')
+      .map(update => update.sessionUpdate === 'agent_message_chunk' ? update.content : undefined)
+    expect(texts).toEqual([{ type: 'text', text: '你' }, { type: 'text', text: '好' }])
+    const thoughts = harness.updates
+      .filter(update => update.sessionUpdate === 'agent_thought_chunk')
+      .map(update => update.sessionUpdate === 'agent_thought_chunk' ? update.content : undefined)
+    expect(thoughts).toEqual([{ type: 'text', text: '思' }, { type: 'text', text: '考' }])
+  })
+
   it('closes one active session without affecting its neighbor', async () => {
     harness = await makeBridgeHarness()
     await harness.client.initialize({ protocolVersion: PROTOCOL_VERSION, clientCapabilities: {} })

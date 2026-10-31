@@ -7,6 +7,8 @@ export interface AgentPreset {
   readonly description?: string
   readonly order?: number
   readonly broken?: string
+  /** Deployment-internal preset hidden from selection surfaces (still resolvable and delegable). */
+  readonly unlisted?: boolean
 }
 
 /** Registry selection policy. */

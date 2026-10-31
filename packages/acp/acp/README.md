@@ -47,6 +47,7 @@ Every session the server creates uses the provider and model configured here. Bo
 | `provider` | — | Provider route for every session's agent |
 | `model` | — | Model for every session's agent |
 | `sessionListPageSize` | `100` | Maximum summaries returned in one `session/list` page |
+| `streamAssistant` | `false` | Also forward live text/reasoning deltas as incremental chunks; committed messages then omit the streamed blocks |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-acp) is the exhaustive source for every accepted field and its JSDoc.
 

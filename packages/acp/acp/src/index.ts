@@ -79,6 +79,13 @@ export interface AcpConfig {
   model?: string
   /** Maximum summaries returned by one session/list page. */
   sessionListPageSize?: number
+  /**
+   * Also forward live assistant text and reasoning deltas as incremental
+   * `agent_message_chunk` / `agent_thought_chunk` updates. Committed messages
+   * then omit their already-streamed text and thought blocks. Opt in only when
+   * the client renders incrementally; abandoned attempts may leave partial text.
+   */
+  streamAssistant?: boolean
   /** Runtime-only transport override; production uses stdio. */
   stream?: Stream
 }
@@ -87,6 +94,7 @@ export const Config: Schema<AcpConfig> = Schema.object({
   provider: Schema.string(),
   model: Schema.string(),
   sessionListPageSize: Schema.natural().min(1).default(DEFAULT_SESSION_LIST_PAGE_SIZE),
+  streamAssistant: Schema.boolean().default(false),
 })
 
 /**
@@ -215,6 +223,7 @@ export function apply(ctx: Context, config: AcpConfig): void {
           fallbackSelection: initialSelection(config),
           signal,
           notify,
+          streamAssistant: config.streamAssistant === true,
         })
       } catch (error: unknown) {
         if (error instanceof AcpMcpConfigError) throw invalidParams(error.message)
@@ -266,6 +275,7 @@ export function apply(ctx: Context, config: AcpConfig): void {
             fallbackSelection: initialSelection(config),
             signal,
             notify,
+            streamAssistant: config.streamAssistant === true,
           })
         } catch (error: unknown) {
           if (error instanceof AcpMcpConfigError) throw invalidParams(error.message)

@@ -8,6 +8,7 @@ import {
   type PromptResponse,
   type SessionConfigOption,
   type SessionNotification,
+  type SessionUpdate,
   type StopReason,
 } from '@agentclientprotocol/sdk'
 import type { Agent, AgentHandle, AgentOptions, AgentStatus, ModelSelection } from '@deepseek-ai/dsh-agent'
@@ -35,6 +36,8 @@ interface AcpSessionBuildOptions {
   fallbackSelection: ModelSelection | undefined
   signal: AbortSignal
   notify: (notification: SessionNotification) => Promise<void>
+  /** Forward live assistant text and reasoning deltas as incremental ACP chunks. */
+  streamAssistant: boolean
 }
 
 /** Fresh ACP session construction inputs. */
@@ -112,10 +115,35 @@ export class AcpSession {
     handle: AgentHandle,
     modelControl: AcpModelControl,
     private readonly notify: (notification: SessionNotification) => Promise<void>,
+    private readonly streamAssistant: boolean,
   ) {
     this.agent = handle.agent
     this.modelControl = modelControl
     this.disposeAgent = () => handle.dispose()
+    if (streamAssistant) this.watchAssistantStream()
+  }
+
+  /**
+   * Forward live text and reasoning deltas as incremental ACP chunks, serialized
+   * with committed updates through the output queue. Opt-in via `streamAssistant`;
+   * committed messages then drop their already-streamed text and thought blocks.
+   */
+  private watchAssistantStream(): void {
+    this.agent.ctx.on('agent/assistant-stream', ({ frame }) => {
+      if (frame.type !== 'chunk') return
+      const chunk = frame.chunk
+      if (chunk.type !== 'text-delta' && chunk.type !== 'reasoning-delta') return
+      const update: SessionUpdate = {
+        sessionUpdate: chunk.type === 'text-delta' ? 'agent_message_chunk' : 'agent_thought_chunk',
+        content: { type: 'text', text: chunk.text },
+      }
+      const previous = this.outputTail
+      this.outputTail = previous
+        .then(() => this.notify({ sessionId: this.agent.session.id, update }))
+        .catch((error: unknown) => {
+          this.ctx.logger.warn(`acp: assistant stream delivery failed: ${errorChain(error)}`)
+        })
+    })
   }
 
   private readonly disposeAgent: () => Promise<void>
@@ -138,7 +166,7 @@ export class AcpSession {
         await mountAcpMcpServers(agentCtx, options.mcpServers, options.cwd)
       },
     })
-    return new AcpSession(ctx, handle, modelControl, options.notify)
+    return new AcpSession(ctx, handle, modelControl, options.notify, options.streamAssistant)
   }
 
   /**
@@ -168,7 +196,7 @@ export class AcpSession {
       throw internalError('session/resume did not compose model selection')
     }
     /* v8 ignore stop */
-    return new AcpSession(ctx, handle, modelControl, options.notify)
+    return new AcpSession(ctx, handle, modelControl, options.notify, options.streamAssistant)
   }
 
   /**
@@ -357,6 +385,10 @@ export class AcpSession {
         const previous = this.outputTail
         const delivery = previous.then(async () => {
           for (const update of await assistantUpdates(this.ctx, session, event)) {
+            // Live streaming already delivered text and thought increments; the
+            // committed projection still carries usage and non-text content.
+            if (this.streamAssistant && (update.sessionUpdate === 'agent_thought_chunk'
+              || (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text'))) continue
             await this.notify({ sessionId: this.agent.session.id, update })
           }
         })

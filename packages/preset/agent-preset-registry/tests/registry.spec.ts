@@ -144,6 +144,26 @@ describe('declarative preset revisions', () => {
     })
     await expect(ctx.agentPresets.readDocument('absent')).rejects.toThrow('Unknown agent preset: absent')
   })
+
+  it('reads a registered declaration for templating, or undefined when absent', async () => {
+    const ctx = await setup()
+    const definition = { ...contribution('standard'), name: 'Standard', description: 'General' }
+    await declare(ctx, definition)
+    expect(ctx.agentPresets.declaration('standard')).toMatchObject({
+      id: 'standard', name: 'Standard', description: 'General',
+    })
+    expect(ctx.agentPresets.declaration('standard')?.plugins).toEqual(definition.plugins)
+    expect(ctx.agentPresets.declaration('absent')).toBeUndefined()
+  })
+
+  it('carries the unlisted deployment marker into the roster row', async () => {
+    const ctx = await setup()
+    await declare(ctx, { ...contribution('standard'), unlisted: true })
+    await declare(ctx, contribution('minimal'))
+    const rows = await ctx.agentPresets.list()
+    expect(rows.find(row => row.id === 'standard')?.unlisted).toBe(true)
+    expect(rows.find(row => row.id === 'minimal')?.unlisted).toBeUndefined()
+  })
 })
 
 it('retains a retired revision for an in-flight cold read', async () => {

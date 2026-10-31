@@ -114,6 +114,17 @@ describe('the agent-preset roster store', () => {
     expect(controller.store.getSnapshot().options.map(option => option.id)).toEqual(['standard'])
   })
 
+  it('offers no unlisted preset: deployment-internal compositions stay off the picker', async () => {
+    const controller = derivedController(fakeApi([
+      { id: 'standard', isDefault: true },
+      { id: 'internal', isDefault: false, unlisted: true },
+    ] as never))
+
+    await controller.load()
+
+    expect(controller.store.getSnapshot().options.map(option => option.id)).toEqual(['standard'])
+  })
+
   it('carries the display metadata a preset published', async () => {
     const controller = derivedController(fakeApi([
       { id: 'standard', isDefault: true, name: '标准模式', description: '完整的编码 agent。' },

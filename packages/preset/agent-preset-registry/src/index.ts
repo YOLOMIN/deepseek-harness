@@ -171,6 +171,15 @@ export class AgentPresetRegistry extends TypertRemoteService {
     }))
   }
 
+  /**
+   * Read one registered definition as declared, for templating by host integrations.
+   * @param id - exact preset identity.
+   * @returns the registered declaration, or undefined when no such preset exists.
+   */
+  declaration(id: string): PresetDefinition | undefined {
+    return this.definitions.get(id)?.config
+  }
+
   /** Read every declared preset, including activation failures.
    * @returns Display metadata and loading diagnostics.
    */
@@ -182,6 +191,7 @@ export class AgentPresetRegistry extends TypertRemoteService {
         ...(record.config.name === undefined ? {} : { name: record.config.name }),
         ...(record.config.description === undefined ? {} : { description: record.config.description }),
         ...(record.config.order === undefined ? {} : { order: record.config.order }),
+        ...(record.config.unlisted === undefined ? {} : { unlisted: record.config.unlisted }),
         ...(broken === undefined ? {} : { broken }),
       }
     }))
