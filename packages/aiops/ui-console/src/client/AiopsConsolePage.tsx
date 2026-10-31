@@ -5,8 +5,15 @@
  * 控制台按登录账户权限过滤可见资源：普通账户仅见所对接系统的智能体与资源，管理员可见全部。
  * 会话管理直接复用 dsh 既有会话功能，不在控制台重复建设。
  */
-import { useEffect, useState } from 'react'
-import { closeConsolePanel, consumeInitialTab } from './initial-tab.ts'
+import { useCallback, useEffect, useState } from 'react'
+import css from './AiopsConsolePage.module.css'
+import { consumeInitialTab } from './initial-tab.ts'
+import type { AiopsAgentsFace } from './agents-face.ts'
+import type { AiopsLogsFace } from './logs-face.ts'
+import type { AiopsMemoryFace } from './memory-face.ts'
+import type { AiopsAgentRow } from '@gac2/dsh-aiops-agent-controller/types'
+import type { AiopsLogKind, AiopsLogLevel, AiopsLogPage, AiopsLogRow } from '@gac2/dsh-aiops-log-controller/types'
+import type { AiopsMemoryDetail, AiopsMemoryKind, AiopsMemoryPage, AiopsMemoryRow, AiopsRecallConfig } from '@gac2/dsh-aiops-memory-controller/types'
 import type { AiopsLocaleKey } from './locales.ts'
 import {
   IconDatabaseOutlineRegular,
@@ -47,6 +54,9 @@ const grid: Record<string, string | number> = {
   display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))', gap: 12,
 }
 
+/** 原生 option 在深色主题下需显式配色，否则弹出层白底白字。 */
+const optionStyle: Record<string, string> = { background: V.bg, color: V.text }
+
 function Tag({ color, children }: { color: string; children: unknown }) {
   return (
     <span style={{
@@ -56,10 +66,12 @@ function Tag({ color, children }: { color: string; children: unknown }) {
   )
 }
 
-function Btn({ primary, danger, onClick, children }: { primary?: boolean; danger?: boolean; onClick?: (() => void) | undefined; children: unknown }) {
+function Btn(props: { primary?: boolean; danger?: boolean; disabled?: boolean; onClick?: (() => void) | undefined; children: unknown }) {
+  const { primary, danger, disabled, onClick, children } = props
   return (
-    <button onClick={onClick} style={{
-      fontSize: 12, cursor: 'pointer', borderRadius: 6, padding: '3px 10px', whiteSpace: 'nowrap',
+    <button disabled={disabled} onClick={onClick} style={{
+      fontSize: 12, cursor: disabled === true ? 'default' : 'pointer', borderRadius: 6, padding: '3px 10px', whiteSpace: 'nowrap',
+      opacity: disabled === true ? 0.45 : 1,
       border: primary ? 'none' : `1px solid ${danger ? V.error : V.border}`,
       background: primary ? V.brand : 'transparent',
       color: primary ? V.onBrand : danger ? V.error : V.text2,
@@ -71,7 +83,7 @@ function Btn({ primary, danger, onClick, children }: { primary?: boolean; danger
 function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
     <span
-      onClick={() => onChange(!on)}
+      onClick={() => { onChange(!on) }}
       style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: V.text2, cursor: 'pointer', userSelect: 'none' }}
     >
       {label}
@@ -83,18 +95,19 @@ function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boolean) =
   )
 }
 
-function Table({ head, rows }: { head: string[]; rows: (unknown)[][] }) {
+/** 清单表格：widths 提供固定列宽（固定布局），未给宽度的列吸收剩余空间。 */
+function Table({ head, rows, widths }: { head: string[]; rows: (unknown)[][]; widths?: (number | undefined)[] }) {
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: widths === undefined ? 'auto' : 'fixed' }}>
       <thead>
-        <tr>{head.map(h => (
-          <th key={h} style={{ textAlign: 'left', padding: '8px 10px', color: V.text3, fontWeight: 400, borderBottom: `1px solid ${V.border}` }}>{h}</th>
+        <tr>{head.map((h, i) => (
+          <th key={h} style={{ textAlign: 'left', padding: '8px 10px', color: V.text3, fontWeight: 400, borderBottom: `1px solid ${V.border}`, width: widths?.[i] }}>{h}</th>
         ))}</tr>
       </thead>
       <tbody>
         {rows.map((r, i) => (
           <tr key={i}>{r.map((c, j) => (
-            <td key={j} style={{ padding: '9px 10px', color: V.text, borderBottom: `1px solid ${V.border}`, verticalAlign: 'top' }}>{c as never}</td>
+            <td key={j} style={{ padding: '9px 10px', color: V.text, borderBottom: `1px solid ${V.border}`, verticalAlign: 'top', wordBreak: 'break-word' }}>{c as never}</td>
           ))}</tr>
         ))}
       </tbody>
@@ -102,13 +115,26 @@ function Table({ head, rows }: { head: string[]; rows: (unknown)[][] }) {
   )
 }
 
-/** 分页条：清单统一分页展示。 */
-function Pager({ total, unit }: { total: number; unit: string }) {
+/** 分页条：清单统一分页展示；传入 onPage 即为真实翻页，否则展示单页占位；busy 时禁用翻页防连点。 */
+function Pager(props: {
+  total: number
+  unit: string
+  page?: number
+  pages?: number
+  busy?: boolean
+  onPage?: ((page: number) => void) | undefined
+}) {
+  const current = props.page ?? 1
+  const totalPages = props.pages ?? 1
+  const busy = props.busy ?? false
+  const onPage = props.onPage
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 12, color: V.text3 }}>
-      <span>共 {total} {unit}</span>
+      <span>共 {props.total} {props.unit}</span>
       <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
-        <Btn>‹ 上一页</Btn><span>1 / 1 页</span><Btn>下一页 ›</Btn>
+        <Btn disabled={busy || current <= 1} onClick={() => { onPage?.(current - 1) }}>‹ 上一页</Btn>
+        <span>{current} / {totalPages} 页</span>
+        <Btn disabled={busy || current >= totalPages} onClick={() => { onPage?.(current + 1) }}>下一页 ›</Btn>
       </span>
     </div>
   )
@@ -129,8 +155,15 @@ function FuncCard({ name, kind, children }: { name: string; kind: 'manage' | 'ru
 
 /** 市场式条目卡片：图标 + 名称 + 描述 + 标签 + 来源 + 操作按钮。 */
 function ItemCard(props: {
-  icon: string; iconColor: string; name: string; meta?: string; desc: string;
-  tags?: { color: string; text: string }[]; source: string; actions: unknown; highlight?: boolean
+  icon: string
+  iconColor: string
+  name: string
+  meta?: string
+  desc: string
+  tags?: { color: string; text: string }[]
+  source: string
+  actions: unknown
+  highlight?: boolean
 }) {
   return (
     <div style={{
@@ -147,10 +180,7 @@ function ItemCard(props: {
           {props.meta && <div style={{ fontSize: 11.5, color: V.text3, fontFamily: V.mono }}>{props.meta}</div>}
         </div>
       </div>
-      <div style={{
-        fontSize: 12.5, color: V.text2, lineHeight: 1.7, flex: 1,
-        display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-      }}>{props.desc}</div>
+      <div style={{ fontSize: 12.5, color: V.text2, lineHeight: 1.7, flex: 1 }} className={css.clamp3}>{props.desc}</div>
       {props.tags && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{props.tags.map((tg, i) => <Tag key={i} color={tg.color}>{tg.text}</Tag>)}</div>}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, borderTop: `1px solid ${V.border}`, paddingTop: 8 }}>
         <span style={{ fontSize: 11.5, color: V.text3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{props.source}</span>
@@ -165,94 +195,227 @@ function Note({ children }: { children: unknown }) {
 }
 
 /* ---------- 智能体管理（生命周期 + 会话关联；按账户权限过滤） ---------- */
-/** 智能体实例卡片：头像 + 职责 + 模型 + 上次活跃 + 最近会话摘要 + 打开会话入口。 */
+/** 相对时间：最近会话列的友好显示。 */
+function formatRelative(ts: number): string {
+  const minutes = Math.floor((Date.now() - ts) / 60000)
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes} 分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} 小时前`
+  return `${Math.floor(hours / 24)} 天前`
+}
+
+const DEFAULT_PERSONA = '你是操作系统智能运维平台的诊断智能体，'
+  + '你的职责是面向仿真计算集群开展智能诊断，按"感知—认知—推理—决策—行动—观察"的循环定位故障根因并给出处置建议。'
+  + '处理诊断类问题时，先调用 memory_recall 召回历史诊断经验（长期记忆）作参考；'
+  + '形成明确的故障诊断结论后，必须先调用 memory_record 工具沉淀经验（summary 为一句话结论，detail 为完整结论与处置建议），再输出最终答复；'
+  + '日常问答、寒暄或链路测试不要调用这两个工具。'
+
+/** 智能体实例卡片：头像 + 职责 + 模型 + 会话统计 + 生命周期操作。 */
 function AgentCard(props: {
-  icon: string; iconColor: string; name: string; role: string; model: string;
-  lastActive: string; lastSession: string; sessions: number; source: string; highlight?: boolean;
-  onOpen?: () => void
+  row: AiopsAgentRow
+  onOpen: () => void
+  onConfigure: () => void
+  onRemove: () => void
 }) {
+  const { row } = props
+  const healthy = row.broken === undefined
   return (
-    <div style={{
-      ...card, display: 'flex', flexDirection: 'column', gap: 8,
-      border: props.highlight ? `1px solid ${V.brand}` : `1px solid ${V.border}`,
-    }}>
+    <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <span style={{
           width: 38, height: 38, borderRadius: 19, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: props.iconColor, color: '#fff', fontSize: 16, fontWeight: 600,
-        }}>{props.icon}</span>
+          background: '#5b6ee1', color: '#fff', fontSize: 16, fontWeight: 600,
+        }}>{row.name.slice(0, 1)}</span>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: V.text }}>{props.name}</div>
-          <div style={{ fontSize: 11.5, color: V.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{props.role}</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: V.text }}>{row.name}</div>
+          <div style={{ fontSize: 11.5, color: V.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.role || '—'}</div>
         </div>
-        <span style={{ marginLeft: 'auto' }}><Tag color={V.success}>运行中</Tag></span>
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          {healthy ? <Tag color={V.success}>运行中</Tag> : <Tag color={V.error}>异常</Tag>}
+        </span>
       </div>
-      <div style={{ fontSize: 11.5, color: V.text3, fontFamily: V.mono }}>{props.model}</div>
-      <div style={{ fontSize: 12, color: V.text3 }}>上次活跃：{props.lastActive} · 会话 {props.sessions} 个</div>
-      <div style={{
-        fontSize: 12.5, color: V.text2, lineHeight: 1.7, flex: 1,
-        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}>最近会话：{props.lastSession}</div>
+      <div style={{ fontSize: 12, color: V.text3 }}>
+        会话 {row.sessions} 个{row.lastActiveAt === undefined ? ' · 暂无会话' : ` · 最近会话：${formatRelative(row.lastActiveAt)}`}
+      </div>
+      {row.broken !== undefined && (
+        <div style={{ fontSize: 12, color: V.error, lineHeight: 1.6 }} title={row.broken}>
+          {row.broken.length > 80 ? `${row.broken.slice(0, 80)}…` : row.broken}
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, borderTop: `1px solid ${V.border}`, paddingTop: 8 }}>
         <Btn primary onClick={props.onOpen}>打开会话</Btn>
-        <Btn>配置</Btn>
-        <Btn danger>销毁</Btn>
-        <span style={{ marginLeft: 'auto', fontSize: 11.5, color: V.text3 }}>{props.source}</span>
+        <Btn onClick={props.onConfigure}>配置</Btn>
+        {row.builtin === true ? null : <Btn danger onClick={props.onRemove}>销毁</Btn>}
+        <span style={{ marginLeft: 'auto', fontSize: 11.5, color: V.text3 }}>{row.id}</span>
       </div>
     </div>
   )
 }
 
-/* ---------- 打开会话：跳转 dsh 既有会话界面并归属对应智能体实例 ---------- */
-/** 点击"打开会话"：设置待归属实例 → 新建会话 → 关闭控制台面板回到会话主界面；
- * 会话树重算时自动归属（aiops.sessionAgents），会话界面顶部徽标与会话列表实例徽标由 ui-workspace 按归属渲染。 */
-function openAgentSession(agent: { name: string; icon: string; color: string; key: string }) {
-  try { localStorage.setItem('aiops.pendingAgent', agent.key) } catch { /* 存储不可用时跳过 */ }
-  const byLabel = (l: string) =>
-    Array.from(document.querySelectorAll('button')).find(x => x.getAttribute('aria-label') === l) as HTMLButtonElement | undefined
-  const newChat =
-    byLabel('新建会话') ??
-    (Array.from(document.querySelectorAll('button')).find(x => (x.textContent || '').trim() === '新建会话') as HTMLButtonElement | undefined)
-  if (newChat) newChat.click()
-  else {
-    byLabel('打开侧边栏')?.click()
-    setTimeout(() => byLabel('新建会话')?.click(), 120)
-  }
-  // 关闭控制台面板，露出会话主界面（面板激活时 ui-workspace 会屏蔽当前会话徽标）
-  setTimeout(() => closeConsolePanel(), 60)
-  // 触发会话树重算以完成归属落账与徽标渲染（会话异步创建，多次派发确保落账）
-  for (const ms of [200, 500, 900, 1400, 2000, 2800]) {
-    setTimeout(() => window.dispatchEvent(new Event('aiops-account')), ms)
-  }
+/** 智能体卡片网格每页容量。 */
+const AGENTS_PAGE_SIZE = 6
+
+/** 创建/配置表单状态：create 为空表单，edit 回填已有定义。 */
+interface AgentEditorState {
+  mode: 'create' | 'edit'
+  id?: string
+  name: string
+  role: string
+  personaPrefix: string
 }
 
-function AgentsTab({ role }: { role: Role }) {
-  const agents = [
-    { key: 'os' as const, scope: 'os' as Scope, card: (
-      <AgentCard
-        icon="O" iconColor="#2ea44f" name="OS 智能体" role="系统/硬件诊断 · 对接运维平台"
-        model="deepseek-chat（私有化）" lastActive="2 小时前" sessions={28}
-        lastSession="node-032 掉线根因：ToR 端口误码率 6.2%，建议切换备用链路…"
-        source="对接：运维平台（资源性能监控平台）"
-        onOpen={() => openAgentSession({ name: 'OS 智能体', icon: 'O', color: '#2ea44f', key: 'os' })}
-      />
-    ) },
-  ].filter(a => vis(a.scope, role))
+function AgentsTab({ face }: { face: AiopsAgentsFace }) {
+  const [rows, setRows] = useState<AiopsAgentRow[] | undefined>(undefined)
+  const [error, setError] = useState<string | null>(null)
+  const [editor, setEditor] = useState<AgentEditorState | null>(null)
+  const [removing, setRemoving] = useState<AiopsAgentRow | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const refresh = useCallback(async () => {
+    try {
+      setRows(await face.listAgents())
+      setError(null)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    }
+  }, [face])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  const agents = rows ?? []
+  const [page, setPage] = useState(1)
+  const totalPages = Math.max(1, Math.ceil(agents.length / AGENTS_PAGE_SIZE))
+  const safePage = Math.min(page, totalPages)
+  const pageAgents = agents.slice((safePage - 1) * AGENTS_PAGE_SIZE, safePage * AGENTS_PAGE_SIZE)
+
+  const submitEditor = async () => {
+    if (editor === null || busy) return
+    setBusy(true)
+    try {
+      const persona = editor.personaPrefix.trim()
+      if (editor.mode === 'create') {
+        await face.createAgent({ name: editor.name.trim(), role: editor.role.trim(), personaPrefix: persona })
+      } else if (editor.id !== undefined) {
+        await face.updateAgent({
+          id: editor.id,
+          name: editor.name.trim(),
+          role: editor.role.trim(),
+          ...(persona === '' ? {} : { personaPrefix: persona }),
+        })
+      }
+      setEditor(null)
+      await refresh()
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const confirmRemove = async () => {
+    if (removing === null || busy) return
+    setBusy(true)
+    try {
+      await face.removeAgent(removing.id)
+      setRemoving(null)
+      await refresh()
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div style={{ display: 'grid', gap: 12 }}>
-      <FuncCard name="智能体生命周期管理" kind="manage">
+      <div style={card}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-          <Btn primary>创建智能体</Btn>
+          <Btn primary onClick={() => { setEditor({ mode: 'create', name: '', role: '', personaPrefix: DEFAULT_PERSONA }) }}>创建智能体</Btn>
           <span style={{ marginLeft: 'auto', fontSize: 12, color: V.text3 }}>
-            智能体实例 {agents.length} 个 · 运行中 {agents.length} 个{role !== 'admin' ? '（按账户权限过滤）' : ''}
+            智能体实例 {agents.length} 个 · 异常 {agents.filter(a => a.broken !== undefined).length} 个
           </span>
         </div>
-        <div style={grid}>{agents.map((a, i) => <span key={i} style={{ display: 'contents' }}>{a.card}</span>)}</div>
-        <div style={{ fontSize: 12, color: V.text3, marginTop: 10 }}>
-          智能体以独立实例创建与运行，按实例绑定技能、工具与知识范围并相互隔离；支持创建、配置与销毁等全生命周期管理；每个实例的会话独立归属，经"打开会话"跳转 dsh 会话界面并标识所属智能体实例，进入诊断交互。普通账户仅展示所对接系统的智能体，管理员账户可见全部实例。
+        {error !== null && <div style={{ fontSize: 12.5, color: V.error, marginBottom: 10 }}>{error}</div>}
+        {rows === undefined && error === null && <div style={{ fontSize: 12.5, color: V.text3 }}>加载中…</div>}
+        <div style={grid}>
+          {pageAgents.map(row => (
+            <AgentCard
+              key={row.id}
+              row={row}
+              onOpen={() => { face.openAgentSession(row.id) }}
+              onConfigure={() => { setEditor({ mode: 'edit', id: row.id, name: row.name, role: row.role, personaPrefix: row.personaPrefix ?? '' }) }}
+              onRemove={() => { setRemoving(row) }}
+            />
+          ))}
         </div>
-        <Pager total={agents.length} unit="个实例" />
-      </FuncCard>
+        <Pager total={agents.length} unit="个实例" page={safePage} pages={totalPages} onPage={setPage} />
+      </div>
+
+      {editor !== null && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
+          <div style={{ ...card, width: 420, padding: '16px 18px', display: 'grid', gap: 12, boxShadow: '0 12px 40px rgba(0,0,0,.28)' }}>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: V.text }}>{editor.mode === 'create' ? '创建智能体' : '配置智能体'}</span>
+              <button
+                onClick={() => { setEditor(null) }}
+                style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: V.text3, cursor: 'pointer', fontSize: 14, padding: '0 2px' }}
+              >✕</button>
+            </div>
+            <label style={{ fontSize: 12, color: V.text3, display: 'grid', gap: 3 }}>
+              名称
+              <input
+                value={editor.name}
+                onChange={(e) => { setEditor({ ...editor, name: e.target.value }) }}
+                placeholder="例如：存储诊断智能体"
+                style={{ padding: '7px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 13, background: 'transparent', color: V.text }}
+              />
+            </label>
+            <label style={{ fontSize: 12, color: V.text3, display: 'grid', gap: 3 }}>
+              职责描述
+              <input
+                value={editor.role}
+                onChange={(e) => { setEditor({ ...editor, role: e.target.value }) }}
+                placeholder="例如：存储挂载与文件系统故障诊断"
+                style={{ padding: '7px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 13, background: 'transparent', color: V.text }}
+              />
+            </label>
+            <label style={{ fontSize: 12, color: V.text3, display: 'grid', gap: 3 }}>
+              身份设定（persona，必填）
+              <textarea
+                value={editor.personaPrefix}
+                onChange={(e) => { setEditor({ ...editor, personaPrefix: e.target.value }) }}
+                rows={6}
+                style={{
+                  padding: '8px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12, lineHeight: 1.6,
+                  fontFamily: V.mono, background: 'transparent', color: V.text2, resize: 'vertical',
+                }}
+              />
+            </label>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Btn onClick={() => { setEditor(null) }}>取消</Btn>
+              <Btn primary onClick={() => { void submitEditor() }}>
+                {busy ? '提交中…' : editor.mode === 'create' ? '创建' : '保存'}
+              </Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {removing !== null && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
+          <div style={{ ...card, width: 380, padding: '16px 18px', display: 'grid', gap: 10, boxShadow: '0 12px 40px rgba(0,0,0,.28)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: V.text }}>销毁智能体</div>
+            <div style={{ fontSize: 13, color: V.text2, lineHeight: 1.7 }}>
+              确认销毁「{removing.name}」？其预设将被注销；历史会话仍可查看，但无法再以该智能体运行。
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Btn onClick={() => { setRemoving(null) }}>取消</Btn>
+              <Btn danger onClick={() => { void confirmRemove() }}>{busy ? '销毁中…' : '确认销毁'}</Btn>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -386,76 +549,460 @@ function SkillsTab({ role }: { role: Role }) {
   )
 }
 
-/* ---------- 日志管理（多条件检索 + 详情查看 / 导出，分页；按账户权限过滤） ---------- */
-function LogsTab({ role }: { role: Role }) {
-  const rows = [
-    { scope: 'os' as Scope, cells: ['14:22:01', <Tag key="l1" color={V.brand}>INFO</Tag>, '运行', '诊断会话创建，载入故障上下文（node-032 down）', <span key="a1" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>] },
-    { scope: 'os' as Scope, cells: ['14:22:04', <Tag key="l2" color={V.brand}>INFO</Tag>, '知识检索', 'RAG 双路召回：语义 Top-5 + BM25 Top-5，Rerank 后注入 3 条', <span key="a2" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>] },
-    { scope: 'os' as Scope, cells: ['14:22:06', <Tag key="l3" color={V.brand}>INFO</Tag>, '模型调用', 'deepseek-chat 推理第 1 轮：决策调用 metric-query', <span key="a3" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>] },
-    { scope: 'os' as Scope, cells: ['14:22:09', <Tag key="l4" color={V.brand}>INFO</Tag>, '工具调用', 'metric-query(node-032, ib_errors) 成功，耗时 2.1s', <span key="a4" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>] },
-    { scope: 'os' as Scope, cells: ['14:22:15', <Tag key="l5" color={V.warn}>WARN</Tag>, '决策', '高危工具 node-cmd-exec 触发人工审批，等待确认', <span key="a5" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>] },
-    { scope: 'os' as Scope, cells: ['14:24:40', <Tag key="l6" color={V.brand}>INFO</Tag>, '决策', '输出根因结论：ToR 端口误码率 6.2%，附处置建议', <span key="a6" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>] },
-    { scope: 'hpc' as Scope, cells: ['15:02:11', <Tag key="l7" color={V.brand}>INFO</Tag>, '运行', 'HPC 调度器诊断会话创建（slurm 队列拥堵）', <span key="a7" style={{ display: 'flex', gap: 6 }}><Btn>详情</Btn><Btn>导出</Btn></span>] },
-  ].filter(r => vis(r.scope, role))
+/* ---------- 日志管理（智能体活动日志：关键字/类型/时间筛选 + 详情/导出，真实分页） ---------- */
+const LOG_KIND_LABELS: Record<AiopsLogKind, string> = { run: '运行', model: '模型调用', tool: '工具调用', decision: '决策' }
+const LOG_LEVEL_COLORS: Record<AiopsLogLevel, string> = { info: V.brand, warn: V.warn, error: V.error }
+const LOG_PAGE_SIZE = 10
+
+/** datetime-local 值（本地时区）转 epoch 毫秒；空值不约束，endOfMinute 把结束边界补到该分钟末。 */
+function msOf(value: string, endOfMinute: boolean): number | undefined {
+  if (value === '') return undefined
+  const ms = new Date(value).getTime()
+  return Number.isNaN(ms) ? undefined : ms + (endOfMinute ? 59_999 : 0)
+}
+
+/** 表格时间统一格式：年/月/日 时:分:秒（24 小时制）。 */
+function fmtTime(ms: number): string {
+  return new Date(ms).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+function LogsTab({ face }: { face: AiopsLogsFace }) {
+  const [keyword, setKeyword] = useState('')
+  const [kind, setKind] = useState<'' | AiopsLogKind>('')
+  const [fromInput, setFromInput] = useState('')
+  const [toInput, setToInput] = useState('')
+  const [page, setPage] = useState(1)
+  const [data, setData] = useState<AiopsLogPage | undefined>(undefined)
+  const [querying, setQuerying] = useState(false)
+  const [paging, setPaging] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const runQuery = useCallback(async (targetPage: number, intent: 'query' | 'page' = 'query') => {
+    const fromMs = msOf(fromInput, false)
+    const toMs = msOf(toInput, true)
+    // 筛选只在点“查询”时生效；查询按钮与翻页分开反馈，翻页不让查询按钮显示“查询中”
+    const setBusy = intent === 'page' ? setPaging : setQuerying
+    setBusy(true)
+    try {
+      const result = await face.queryLogs({
+        ...(keyword.trim() === '' ? {} : { keyword: keyword.trim() }),
+        ...(kind === '' ? {} : { kind }),
+        ...(fromMs === undefined ? {} : { fromMs }),
+        ...(toMs === undefined ? {} : { toMs }),
+        page: targetPage,
+        pageSize: LOG_PAGE_SIZE,
+      })
+      setData(result)
+      setPage(result.page)
+      setError(null)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }, [face, keyword, kind, fromInput, toInput])
+
+  useEffect(() => { void runQuery(1, 'page') }, []) // 仅挂载时首查（静默，不亮查询按钮）；筛选变化由“查询”按钮触发
+
+  const [detail, setDetail] = useState<{ row: AiopsLogRow; text: string } | null>(null)
+
+  const downloadJson = (name: string, value: unknown): void => {
+    const blob = new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: 'application/json' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = name
+    link.click()
+    URL.revokeObjectURL(link.href)
+  }
+
+  const openDetail = async (row: AiopsLogRow): Promise<void> => {
+    try {
+      const [, seq] = row.id.split(':')
+      const result = await face.logDetail(row.sessionId, Number(seq))
+      setDetail({ row: result.row, text: JSON.stringify({ event: result.eventType, data: result.data }, null, 2) })
+      setError(null)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    }
+  }
+
+  const exportRow = async (row: AiopsLogRow): Promise<void> => {
+    try {
+      const [, seq] = row.id.split(':')
+      const result = await face.logDetail(row.sessionId, Number(seq))
+      downloadJson(`aiops-log-${row.sessionId}-${seq}.json`, { row: result.row, event: result.eventType, data: result.data })
+      setError(null)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    }
+  }
+
+  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / LOG_PAGE_SIZE))
+
   return (
     <div style={{ display: 'grid', gap: 12 }}>
-      <FuncCard name="日志查询检索" kind="manage">
+      <div style={card}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-          <span style={{ ...card, padding: '4px 10px', fontSize: 12, color: V.text3 }}>时间范围：2026-10-20 全天</span>
-          <span style={{ ...card, padding: '4px 10px', fontSize: 12, color: V.text, fontFamily: V.mono }}>关键字：node-032</span>
-          <Btn primary>查询</Btn>
-          <Btn>导出</Btn>
-          {role !== 'admin' && <span style={{ marginLeft: 'auto', fontSize: 12, color: V.text3 }}>按账户权限过滤，仅显示所对接系统的日志</span>}
+          <input
+            value={keyword}
+            onChange={(e) => { setKeyword(e.target.value) }}
+            onKeyDown={(e) => { if (e.key === 'Enter') void runQuery(1) }}
+            placeholder="关键字：节点 / 工具 / 结论摘要"
+            style={{ padding: '5px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, minWidth: 220, background: 'transparent', color: V.text }}
+          />
+          <select
+            value={kind}
+            onChange={(e) => { setKind(e.target.value as '' | AiopsLogKind) }}
+            // 原生弹出层底色跟随 select 背景：透明会在深色主题下渲染成白底白字
+            style={{ padding: '5px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: V.bg, color: V.text }}
+          >
+            <option value="" style={optionStyle}>全部类型</option>
+            <option value="run" style={optionStyle}>运行</option>
+            <option value="model" style={optionStyle}>模型调用</option>
+            <option value="tool" style={optionStyle}>工具调用</option>
+            <option value="decision" style={optionStyle}>决策</option>
+          </select>
+          <input
+            type="datetime-local"
+            value={fromInput}
+            onChange={(e) => { setFromInput(e.target.value) }}
+            title="开始时间"
+            style={{ padding: '5px 8px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text }}
+          />
+          <span style={{ fontSize: 12, color: V.text3 }}>至</span>
+          <input
+            type="datetime-local"
+            value={toInput}
+            onChange={(e) => { setToInput(e.target.value) }}
+            title="结束时间"
+            style={{ padding: '5px 8px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text }}
+          />
+          <Btn primary disabled={querying} onClick={() => { void runQuery(1) }}>{querying ? '查询中…' : '查询'}</Btn>
         </div>
-        <Table
-          head={['时间', '级别', '类型', '内容摘要', '操作']}
-          rows={rows.map(r => r.cells)}
+        {error !== null && <div style={{ fontSize: 12.5, color: V.error, marginBottom: 10 }}>{error}</div>}
+        {data === undefined && error === null && <div style={{ fontSize: 12.5, color: V.text3 }}>加载中…</div>}
+        {data !== undefined && data.total > 0 && (
+          <Table
+            head={['时间', '级别', '类型', '智能体', '内容摘要', '操作']}
+            widths={[150, 56, 72, 88, undefined, 130]}
+            rows={data.rows.map(row => [
+              fmtTime(row.time),
+              <Tag key="lv" color={LOG_LEVEL_COLORS[row.level]}>{row.level.toUpperCase()}</Tag>,
+              LOG_KIND_LABELS[row.kind],
+              row.agent,
+              row.summary,
+              <span key="op" style={{ display: 'flex', gap: 6 }}>
+                <Btn onClick={() => { void openDetail(row) }}>详情</Btn>
+                <Btn onClick={() => { void exportRow(row) }}>导出</Btn>
+              </span>,
+            ])}
+          />
+        )}
+        {data !== undefined && data.total === 0 && (
+          <div style={{ fontSize: 12.5, color: V.text3, marginTop: 8 }}>无匹配日志，调整筛选条件后重试。</div>
+        )}
+        <Pager
+          total={data?.total ?? 0}
+          unit="条日志"
+          page={page}
+          pages={totalPages}
+          busy={querying || paging}
+          onPage={(next) => { void runQuery(next, 'page') }}
         />
-        <div style={{ fontSize: 12, color: V.text3, marginTop: 8 }}>支持按时间、关键字、会话维度检索与决策回溯，支持查看日志详情与导出。</div>
-        <Pager total={328} unit="条日志" />
-      </FuncCard>
+      </div>
+
+      {detail !== null && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
+          <div style={{ ...card, width: 620, maxWidth: '92vw', padding: '16px 18px', display: 'grid', gap: 10, boxShadow: '0 12px 40px rgba(0,0,0,.28)' }}>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: V.text }}>日志详情</span>
+              <button
+                onClick={() => { setDetail(null) }}
+                style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: V.text3, cursor: 'pointer', fontSize: 14, padding: '0 2px' }}
+              >✕</button>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: V.text3, flexWrap: 'wrap' }}>
+              <span>{new Date(detail.row.time).toLocaleString('zh-CN', { hour12: false })}</span>
+              <Tag color={LOG_LEVEL_COLORS[detail.row.level]}>{detail.row.level.toUpperCase()}</Tag>
+              <Tag color={V.text3}>{LOG_KIND_LABELS[detail.row.kind]}</Tag>
+              <span style={{ fontFamily: V.mono }}>{detail.row.sessionId}</span>
+            </div>
+            <div style={{ fontSize: 13, color: V.text, lineHeight: 1.7 }}>{detail.row.summary}</div>
+            <pre style={{
+              margin: 0, padding: '10px 12px', borderRadius: 8, border: `1px solid ${V.border}`,
+              fontSize: 12, lineHeight: 1.6, fontFamily: V.mono, color: V.text2,
+              maxHeight: 320, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+            }}>{detail.text}</pre>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Btn onClick={() => { face.openLogSession(detail.row.sessionId) }}>打开会话轨迹</Btn>
+              <Btn onClick={() => { void exportRow(detail.row) }}>导出本条</Btn>
+              <Btn primary onClick={() => { setDetail(null) }}>关闭</Btn>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+/* ---------- 记忆管理（真实数据：短期投影自诊断结论，长期晋升持久化，召回配置实时生效） ---------- */
+const MEMORY_KIND_LABELS: Record<AiopsMemoryKind, string> = { short: '短期', long: '长期' }
+const MEMORY_PAGE_SIZE = 10
+/** 短期记忆保留期的可选项（天）；持久值不在列时临时并入。 */
+const TTL_DAY_OPTIONS = [1, 3, 7, 14, 30]
 
-/* ---------- 记忆管理（记忆清单 + 召回配置，分页；按账户权限过滤） ---------- */
-function MemoryTab({ role }: { role: Role }) {
-  const [recall, setRecall] = useState(true)
-  const rows = [
-    { scope: 'os' as Scope, cells: ['node-032 掉线根因：ToR 端口误码，切换备用链路恢复', <Tag key="m1" color={V.success}>长期</Tag>, 'sess-1042', '10-19 14:40', <span key="mo1" style={{ display: 'flex', gap: 6 }}><Btn>查看</Btn><Btn>遗忘</Btn></span>] },
-    { scope: 'os' as Scope, cells: ['GPU 温度超 95℃ 优先检查风扇转速与防尘网', <Tag key="m2" color={V.success}>长期</Tag>, 'sess-1038', '10-18 11:52', <span key="mo2" style={{ display: 'flex', gap: 6 }}><Btn>查看</Btn><Btn>遗忘</Btn></span>] },
-    { scope: 'os' as Scope, cells: ['NFS 挂载超时与存储端连接数耗尽相关', <Tag key="m3" color={V.success}>长期</Tag>, 'sess-1035', '10-18 09:30', <span key="mo3" style={{ display: 'flex', gap: 6 }}><Btn>查看</Btn><Btn>遗忘</Btn></span>] },
-    { scope: 'os' as Scope, cells: ['login-01 负载异常：异常进程 python 占满 CPU', <Tag key="m4" color={V.warn}>短期</Tag>, 'sess-1045', '10-20 16:05', <span key="mo4" style={{ display: 'flex', gap: 6 }}><Btn>查看</Btn><Btn>遗忘</Btn></span>] },
-    { scope: 'hpc' as Scope, cells: ['Slurm 队列拥堵优先核查调度器回填满负荷', <Tag key="m5" color={V.success}>长期</Tag>, 'sess-1031', '10-17 15:20', <span key="mo5" style={{ display: 'flex', gap: 6 }}><Btn>查看</Btn><Btn>遗忘</Btn></span>] },
-  ].filter(r => vis(r.scope, role))
+function MemoryTab({ face }: { face: AiopsMemoryFace }) {
+  const [keyword, setKeyword] = useState('')
+  const [kind, setKind] = useState<'' | AiopsMemoryKind>('')
+  const [fromInput, setFromInput] = useState('')
+  const [toInput, setToInput] = useState('')
+  const [page, setPage] = useState(1)
+  const [data, setData] = useState<AiopsMemoryPage | undefined>(undefined)
+  const [querying, setQuerying] = useState(false)
+  const [paging, setPaging] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [detail, setDetail] = useState<AiopsMemoryDetail | null>(null)
+  const [forgetting, setForgetting] = useState<AiopsMemoryRow | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [recall, setRecall] = useState<AiopsRecallConfig | undefined>(undefined)
+  const [recallNotice, setRecallNotice] = useState<string | null>(null)
+
+  const runQuery = useCallback(async (targetPage: number, intent: 'query' | 'page' = 'query') => {
+    // 筛选只在点“查询”时生效；查询按钮与翻页分开反馈
+    const setBusyFlag = intent === 'page' ? setPaging : setQuerying
+    setBusyFlag(true)
+    try {
+      const fromMs = msOf(fromInput, false)
+      const toMs = msOf(toInput, true)
+      const result = await face.listMemories({
+        ...(keyword.trim() === '' ? {} : { keyword: keyword.trim() }),
+        ...(kind === '' ? {} : { kind }),
+        ...(fromMs === undefined ? {} : { fromMs }),
+        ...(toMs === undefined ? {} : { toMs }),
+        page: targetPage,
+        pageSize: MEMORY_PAGE_SIZE,
+      })
+      setData(result)
+      setPage(result.page)
+      setError(null)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusyFlag(false)
+    }
+  }, [face, keyword, kind, fromInput, toInput])
+
+  useEffect(() => { void runQuery(1, 'page') }, []) // 仅挂载时首查（静默，不亮查询按钮）；筛选变化由“查询”按钮触发
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        setRecall(await face.getRecallConfig())
+      } catch (reason: unknown) {
+        setError(reason instanceof Error ? reason.message : String(reason))
+      }
+    })()
+  }, [face])
+
+  const openDetail = async (row: AiopsMemoryRow) => {
+    try {
+      setDetail(await face.memoryDetail(row.id))
+      setError(null)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    }
+  }
+
+  const promote = async (row: AiopsMemoryRow) => {
+    if (busy) return
+    setBusy(true)
+    try {
+      await face.promoteMemory(row.id)
+      await runQuery(1)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const confirmForget = async () => {
+    if (forgetting === null || busy) return
+    setBusy(true)
+    try {
+      await face.forgetMemory(forgetting.id)
+      setForgetting(null)
+      setDetail(null)
+      await runQuery(page)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const saveRecall = async () => {
+    if (recall === undefined || busy) return
+    setBusy(true)
+    try {
+      const saved = await face.saveRecallConfig({ enabled: recall.enabled, topK: recall.topK, shortTermTtlDays: recall.shortTermTtlDays })
+      setRecall(saved)
+      setRecallNotice('已保存，下一轮诊断生效')
+    } catch (reason: unknown) {
+      setRecallNotice(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / MEMORY_PAGE_SIZE))
+
   return (
     <div style={{ display: 'grid', gap: 12 }}>
-      <FuncCard name="记忆管理" kind="manage">
+      <div style={card}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
-          <span style={{ ...card, padding: '4px 10px', fontSize: 12, color: V.text2 }}>短期记忆 <b style={{ color: V.text }}>36</b> 条</span>
-          <span style={{ ...card, padding: '4px 10px', fontSize: 12, color: V.text2 }}>长期记忆 <b style={{ color: V.text }}>128</b> 条</span>
-          <span style={{ ...card, padding: '4px 10px', fontSize: 12, color: V.text3, minWidth: 160 }}>查询：记忆摘要 / 关键字</span>
-          <Btn>查询</Btn>
-          <span style={{ marginLeft: 'auto', fontSize: 12, color: V.text3 }}>短期记忆经评分阈值评估后晋升为长期记忆</span>
+          <input
+            value={keyword}
+            onChange={(e) => { setKeyword(e.target.value) }}
+            onKeyDown={(e) => { if (e.key === 'Enter') void runQuery(1) }}
+            placeholder="关键字：记忆摘要 / 结论内容"
+            style={{ padding: '5px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, minWidth: 200, background: 'transparent', color: V.text }}
+          />
+          <select
+            value={kind}
+            onChange={(e) => { setKind(e.target.value as '' | AiopsMemoryKind) }}
+            style={{ padding: '5px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: V.bg, color: V.text }}
+          >
+            <option value="" style={optionStyle}>全部类型</option>
+            <option value="short" style={optionStyle}>短期记忆</option>
+            <option value="long" style={optionStyle}>长期记忆</option>
+          </select>
+          <input
+            type="datetime-local"
+            value={fromInput}
+            onChange={(e) => { setFromInput(e.target.value) }}
+            title="开始时间"
+            style={{ padding: '5px 8px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text }}
+          />
+          <span style={{ fontSize: 12, color: V.text3 }}>至</span>
+          <input
+            type="datetime-local"
+            value={toInput}
+            onChange={(e) => { setToInput(e.target.value) }}
+            title="结束时间"
+            style={{ padding: '5px 8px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text }}
+          />
+          <Btn primary disabled={querying} onClick={() => { void runQuery(1) }}>{querying ? '查询中…' : '查询'}</Btn>
         </div>
-        <Table
-          head={['记忆摘要', '类型', '来源会话', '写入时间', '操作']}
-          rows={rows.map(r => r.cells)}
+        {error !== null && <div style={{ fontSize: 12.5, color: V.error, marginBottom: 10 }}>{error}</div>}
+        {data === undefined && error === null && <div style={{ fontSize: 12.5, color: V.text3 }}>加载中…</div>}
+        {data !== undefined && data.total > 0 && (
+          <Table
+            head={['智能体', '类型', '记忆摘要', '写入时间', '操作']}
+            widths={[88, 56, undefined, 150, 170]}
+            rows={data.rows.map(row => [
+              row.agent,
+              <Tag key="k" color={row.kind === 'long' ? V.success : V.warn}>{MEMORY_KIND_LABELS[row.kind]}</Tag>,
+              row.summary,
+              fmtTime(row.time),
+              <span key="op" style={{ display: 'flex', gap: 6 }}>
+                <Btn onClick={() => { void openDetail(row) }}>查看</Btn>
+                {row.kind === 'short' && <Btn onClick={() => { void promote(row) }}>晋升</Btn>}
+                <Btn onClick={() => { setForgetting(row) }}>遗忘</Btn>
+              </span>,
+            ])}
+          />
+        )}
+        {data !== undefined && data.total === 0 && (
+          <div style={{ fontSize: 12.5, color: V.text3, marginTop: 8 }}>暂无记忆：智能体形成诊断结论后会经 memory_record 主动沉淀为短期记忆。</div>
+        )}
+        <Pager
+          total={data?.total ?? 0}
+          unit={data === undefined ? '条记忆' : `条记忆（短期 ${data.shortCount} · 长期 ${data.longCount}）`}
+          page={page}
+          pages={totalPages}
+          busy={querying || paging}
+          onPage={(next) => { void runQuery(next, 'page') }}
         />
-        <Pager total={164} unit="条记忆" />
-      </FuncCard>
-      <FuncCard name="记忆召回配置" kind="manage">
+        <div style={{ fontSize: 12, color: V.text3, marginTop: 8 }}>
+          短期记忆由智能体在形成诊断结论时经 memory_record 主动沉淀，晋升后持久保存为长期记忆；超过保留期未晋升的短期记忆自动遗忘。
+        </div>
+      </div>
+
+      <div style={card}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: V.text, marginBottom: 10 }}>记忆召回配置</div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ ...card, padding: '4px 10px', fontSize: 12, color: V.text2 }}>召回条数 Top-<b style={{ color: V.text }}>3</b></span>
-          <span style={{ ...card, padding: '4px 10px', fontSize: 12, color: V.text2 }}>相似度阈值 <b style={{ color: V.text }}>0.72</b></span>
-          <span style={{ ...card, padding: '4px 10px', fontSize: 12, color: V.text2 }}>长期记忆优先</span>
-          <Btn>保存配置</Btn>
+          <span style={{ fontSize: 12, color: V.text2 }}>召回条数 Top-</span>
+          <select
+            value={recall?.topK ?? 3}
+            onChange={(e) => { setRecall(previous => previous === undefined ? previous : { ...previous, topK: Number(e.target.value) }) }}
+            style={{ padding: '5px 8px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: V.bg, color: V.text }}
+          >
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => <option key={n} value={n} style={optionStyle}>{n}</option>)}
+          </select>
+          <span style={{ fontSize: 12, color: V.text2 }}>短期记忆保留期</span>
+          <select
+            value={recall?.shortTermTtlDays ?? 7}
+            onChange={(e) => {
+              setRecall(previous => previous === undefined ? previous : { ...previous, shortTermTtlDays: Number(e.target.value) })
+            }}
+            style={{ padding: '5px 8px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: V.bg, color: V.text }}
+          >
+            {(recall !== undefined && !TTL_DAY_OPTIONS.includes(recall.shortTermTtlDays)
+              ? [recall.shortTermTtlDays, ...TTL_DAY_OPTIONS]
+              : TTL_DAY_OPTIONS
+            ).map(n => <option key={n} value={n} style={optionStyle}>{n} 天</option>)}
+          </select>
+          <Btn primary disabled={busy || recall === undefined} onClick={() => { void saveRecall() }}>保存配置</Btn>
+          {recallNotice !== null && <span style={{ fontSize: 12, color: V.text3 }}>{recallNotice}</span>}
           <span style={{ marginLeft: 'auto' }}>
-            <Switch on={recall} onChange={setRecall} label="记忆召回注入推理上下文" />
+            <Switch
+              on={recall?.enabled ?? false}
+              onChange={(next) => { setRecall(previous => previous === undefined ? previous : { ...previous, enabled: next }) }}
+              label="记忆召回（智能体按需调用）"
+            />
           </span>
         </div>
-        <div style={{ fontSize: 12, color: V.text3, marginTop: 8 }}>记忆召回随诊断链路自动执行：语义召回相关历史记忆，经去重合并后按上述配置注入推理上下文，支撑经验复用与决策。</div>
-      </FuncCard>
+        <div style={{ fontSize: 12, color: V.text3, marginTop: 8 }}>
+          召回开启后，智能体在诊断时经 memory_recall 工具按 Top-N 主动召回长期记忆作为参考；无关问答不注入、不消耗 token。
+        </div>
+      </div>
+
+      {detail !== null && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
+          <div style={{ ...card, width: 620, maxWidth: '92vw', padding: '16px 18px', display: 'grid', gap: 10, boxShadow: '0 12px 40px rgba(0,0,0,.28)' }}>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: V.text }}>记忆详情</span>
+              <button
+                onClick={() => { setDetail(null) }}
+                style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: V.text3, cursor: 'pointer', fontSize: 14, padding: '0 2px' }}
+              >✕</button>
+            </div>
+            <div style={{ fontSize: 12, color: V.text3 }}>
+              {MEMORY_KIND_LABELS[detail.row.kind]}记忆 · {detail.row.agent} · {new Date(detail.row.time).toLocaleString('zh-CN', { hour12: false })}
+            </div>
+            <pre style={{ margin: 0, padding: '10px 12px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12, lineHeight: 1.7, color: V.text2, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: '46vh', overflow: 'auto', fontFamily: 'inherit' }}>{detail.text}</pre>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Btn onClick={() => { face.openMemorySession(detail.row.sessionId) }}>打开会话轨迹</Btn>
+              <Btn onClick={() => { setDetail(null) }}>关闭</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {forgetting !== null && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
+          <div style={{ ...card, width: 380, padding: '16px 18px', display: 'grid', gap: 10, boxShadow: '0 12px 40px rgba(0,0,0,.28)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: V.text }}>遗忘记忆</div>
+            <div style={{ fontSize: 13, color: V.text2, lineHeight: 1.7 }}>
+              确认遗忘「{forgetting.summary}」？{forgetting.kind === 'long' ? '长期记忆将被删除。' : '该短期记忆将不再出现在清单中。'}
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Btn onClick={() => { setForgetting(null) }}>取消</Btn>
+              <Btn danger onClick={() => { void confirmForget() }}>{busy ? '遗忘中…' : '确认遗忘'}</Btn>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -534,12 +1081,13 @@ function McpTab({ role }: { role: Role }) {
 }
 
 /* ---------- 页面骨架 ---------- */
+// 智能体/日志/记忆页签单独渲染：它们需要 apply 注入的数据面，View 仅承载纯展示页签。
 const TABS = [
-  { key: 'agents', label: '智能体管理', Icon: IconAgentPresetOutlineRegular, View: AgentsTab },
+  { key: 'agents', label: '智能体管理', Icon: IconAgentPresetOutlineRegular, View: undefined },
   { key: 'rag', label: 'RAG 管理', Icon: IconDatabaseOutlineRegular, View: RagTab },
   { key: 'skills', label: 'skills 管理', Icon: IconSkillOutlineRegular, View: SkillsTab },
-  { key: 'logs', label: '日志管理', Icon: IconChecklistOutlineRegular, View: LogsTab },
-  { key: 'memory', label: '记忆管理', Icon: IconThinkOutlineRegular, View: MemoryTab },
+  { key: 'logs', label: '日志管理', Icon: IconChecklistOutlineRegular, View: undefined },
+  { key: 'memory', label: '记忆管理', Icon: IconThinkOutlineRegular, View: undefined },
   { key: 'mcp', label: 'MCP 接口管理', Icon: IconApiOutlineRegular, View: McpTab },
 ] as const
 
@@ -564,8 +1112,13 @@ function readPlatformAccount(): Account | null {
 }
 
 /** 控制台主页：六模块页签 + 卡片式内容区；账户体系统一在左下角（ui-settings-account 平台账户模式）。 */
-export function AiopsConsolePage(props: { t?: (key: AiopsLocaleKey) => string }) {
-  const { t } = props
+export function AiopsConsolePage(props: {
+  t?: (key: AiopsLocaleKey) => string
+  agents: AiopsAgentsFace
+  logs: AiopsLogsFace
+  memory: AiopsMemoryFace
+}) {
+  const { t, agents: agentsFace, logs: logsFace, memory: memoryFace } = props
   // 初始页签：平台入口页跳转指定（pf_tab Cookie → consumeInitialTab），默认智能体管理
   const [tab, setTab] = useState<TabKey>(() => {
     const v = consumeInitialTab()
@@ -573,7 +1126,7 @@ export function AiopsConsolePage(props: { t?: (key: AiopsLocaleKey) => string })
   })
   const [account, setAccount] = useState<Account | null>(readPlatformAccount)
   useEffect(() => {
-    const sync = () => setAccount(readPlatformAccount())
+    const sync = () => { setAccount(readPlatformAccount()) }
     window.addEventListener(PLATFORM_EVENT, sync)
     window.addEventListener('storage', sync)
     return () => {
@@ -581,22 +1134,13 @@ export function AiopsConsolePage(props: { t?: (key: AiopsLocaleKey) => string })
       window.removeEventListener('storage', sync)
     }
   }, [])
-  const Active = TABS.find(x => x.key === tab)!.View
+  const Active = TABS.find(x => x.key === tab && x.View !== undefined)?.View
   const role: Role = account ? toConsoleRole(account.role) : 'admin'
 
   return (
     <div style={{ padding: '20px 24px', maxWidth: 980, margin: '0 auto', color: V.text }}>
-      <div style={{ marginBottom: 14, display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
-        <div>
-          <div style={{ fontSize: 18, fontWeight: 600 }}>{t?.('title') ?? '智能运维控制台'}</div>
-          <div style={{ fontSize: 12.5, color: V.text3, marginTop: 4 }}>{t?.('subtitle') ?? ''}</div>
-        </div>
-        {account && (
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: V.text3 }}>
-            当前账户：<Tag color={V.brand}>{account.name}</Tag>
-            <span>{account.role === 1 ? '管理员' : '运维账户'}（按账户权限过滤资源）</span>
-          </div>
-        )}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 18, fontWeight: 600 }}>{t?.('title') ?? '智能运维控制台'}</div>
       </div>
       {!account ? (
         <FuncCard name="统一账号认证" kind="manage">
@@ -613,9 +1157,9 @@ export function AiopsConsolePage(props: { t?: (key: AiopsLocaleKey) => string })
             {TABS.map(({ key, label, Icon }) => (
               <button
                 key={key}
-                onClick={() => setTab(key)}
+                onClick={() => { setTab(key) }}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap',
                   padding: '8px 14px', border: 'none', background: 'transparent',
                   color: tab === key ? V.brand : V.text2,
                   borderBottom: tab === key ? `2px solid ${V.brand}` : '2px solid transparent',
@@ -627,7 +1171,13 @@ export function AiopsConsolePage(props: { t?: (key: AiopsLocaleKey) => string })
               </button>
             ))}
           </div>
-          <Active role={role} />
+          {tab === 'agents'
+            ? <AgentsTab face={agentsFace} />
+            : tab === 'logs'
+              ? <LogsTab face={logsFace} />
+              : tab === 'memory' || Active === undefined
+                ? <MemoryTab face={memoryFace} />
+                : <Active role={role} />}
         </>
       )}
     </div>

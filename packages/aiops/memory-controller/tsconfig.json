@@ -1,0 +1,23 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "types": ["node"]
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../../vendor/schemastery" },
+    { "path": "../../typert/protocol" },
+    { "path": "../../preset/agent-preset-registry" },
+    { "path": "../../core/agent" },
+    { "path": "../../core/tools" },
+    { "path": "../../core/session" },
+    { "path": "../../llm/llm" },
+    { "path": "../../session/session-projection" },
+    { "path": "../../session-query/session-query" },
+    { "path": "../agent-controller" },
+    { "path": "../log-controller" }
+  ]
+}

@@ -20,11 +20,11 @@ Add the operations console to the DSH Web sidebar and main panel. The console co
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount `@gac2/dsh-client-ui-aiops` through `aiops.patch.yml`. The plugin contributes the sidebar entry, console panel, localized dictionaries, and account-aware example views. Its Agent card opens a new Session through the existing Workspace browser and associates it with the OS agent.
+Mount `@gac2/dsh-client-ui-aiops` through `aiops.patch.yml`. The plugin contributes the sidebar entry, console panel, localized dictionaries, and account-aware views. The Agents tab is live data: it reads and mutates the roster through the `aiopsAgents` Remote namespace served by `@gac2/dsh-aiops-agent-controller`, and its open-session action starts a Session bound to the chosen preset through Workspace navigation.
 
 ## Model Experience
 
-The console does not add model-visible content. OS agent identity and tool composition are supplied by `aiops.patch.yml` or `aiops-headless.patch.yml`; this package contributes no prompt or tool behavior.
+None, as the console adds no model-visible content; operations agent identity and tool composition are supplied by `aiops.patch.yml` or `aiops-headless.patch.yml`.
 
 #### KV Cache effect
 
@@ -34,8 +34,7 @@ No model request prefix changes.
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- Console resource lists and counts are prototype data until the platform services expose them.
-- Most management actions are presentation placeholders; durable operations require their owning RAG, Skill, log, memory, and MCP services.
+- The RAG, skills, logs, memory, and MCP tabs are prototype data until their owning services expose them; only the Agents tab is backed by live services.
 - Account filtering is browser-local for the current integration and is not a server-side authorization boundary.
 
 <a id="dev-note"></a>

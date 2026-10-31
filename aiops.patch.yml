@@ -1,10 +1,10 @@
-# 智能运维控制台原型叠加层：在 web 组合的浏览器插件表中追加 aiops 控制台，
-# 并声明 OS 智能体预设（Web 会话默认挂载）；headless 链路（运维 Copilot）
-# 无预设机制，身份经 system-prompt 的 personaPrefix 注入。
+# 智能运维控制台叠加层：在 web 组合的浏览器插件表中追加 aiops 控制台，
+# 并声明运维智能体体系（Web 会话默认挂载注册表种子 ops-agent）；
+# headless 链路（运维 Copilot）无预设机制，身份与委托能力见 aiops-headless.patch.yml。
 - insert:
     # 集成中继：独立 3081 webServer，与主 Web 3080 共享 DSH 生命周期。
-    # 仅保留控制台跳转（token 注入与免登票据透传）与 Copilot 流式通道；
-    # 平台账户认证适配由运维平台标准接口 /api/aiops/* 直接提供。
+    # 仅保留控制台跳转（经同进程 connection 服务注入访问令牌、透传免登票据）
+    # 与 Copilot 流式通道；平台账户认证适配由运维平台标准接口 /api/aiops/* 直接提供。
     - id: aiops-auth-relay-group
       name: cordis:group
       group: true
@@ -22,30 +22,150 @@
             platformOrigin: http://192.168.10.95:9091
             dshRoot: .
             sessionCwd: .
-            consoleLogPath: ../dsh-web.log
+            consoleTarget: http://127.0.0.1:3080/
 
     - id: aiops-console
       name: '@gac2/dsh-client-ui-aiops'
 
-    # OS 智能体预设：会话级身份与工具集。插件清单对齐 standard 预设，
-    # 仅替换 persona 身份描述；后续接入平台 MCP 工具时在此追加。
+    # 智能体管理：控制台智能体定义注册表（JSON 持久化）与动态预设生命周期，
+    # 向浏览器暴露 aiopsAgents 命名空间；模板预设为隐藏的内置 os-agent。
+    - id: aiops-agent-controller
+      name: '@gac2/dsh-aiops-agent-controller'
+      config:
+        templatePresetId: os-agent
+
+    # 日志管理：智能体活动日志投影（会话日志 → 可筛选分页的日志行），
+    # 向浏览器暴露 aiopsLogs 命名空间；详情经会话轨迹页查看，不重存日志副本。
+    - id: aiops-log-controller
+      name: '@gac2/dsh-aiops-log-controller'
+
+    # 记忆管理：短期记忆投影自受管智能体已完成轮次的诊断结论，晋升为长期记忆后
+    # 持久化（晋升/遗忘/召回配置见 aiopsMemory 命名空间）；召回经 agent/pre-step
+    # 在每轮第 1 步把长期记忆注入受管智能体的推理上下文。
+    - id: aiops-memory-controller
+      name: '@gac2/dsh-aiops-memory-controller'
+
+    # 运维智能体模板预设：会话级身份与工具集（含 A2A 委托工具）。
+    # 控制台注册的每个智能体都以它为克隆模板；它不出现在控制台清单中。
     - id: preset-os-agent
       name: '@deepseek-ai/dsh-agent-preset'
       config:
         id: os-agent
-        name: OS 智能体
-        description: 面向系统环境层与硬件层故障的智能诊断智能体
+        name: 运维智能体模板
+        description: 控制台注册智能体的克隆模板
+        unlisted: true
         order: 0
         plugins:
           - id: persona
             name: '@deepseek-ai/dsh-persona'
             config:
               prefix: >-
-                你是操作系统智能运维平台的 OS 智能体，底层模型是 {{model}}。
-                你的职责是面向仿真计算集群的系统环境层与硬件层故障开展智能诊断：
-                结合运维知识库与监控数据，按"感知—认知—推理—决策—行动—观察"的
-                循环定位故障根因并给出处置建议。回答时以运维诊断专家的身份组织
-                内容，不要自称编码智能体。
+                你是操作系统智能运维平台的运维智能体。
+                你的职责是面向仿真计算集群开展故障诊断：结合运维知识库与监控数据，
+                按"感知—认知—推理—决策—行动—观察"的循环定位故障根因并给出处置建议。
+                处理诊断类问题时，先调用 memory_recall 召回历史诊断经验（长期记忆）作参考；
+                形成明确的故障诊断结论后，必须先调用 memory_record 工具沉淀经验（summary 为一句话结论，
+                detail 为完整结论与处置建议），再输出最终答复；日常问答、寒暄或链路测试不要调用这两个工具。
+                不要自称编码智能体。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          # A2A 协同：经子代理委托把下层问题交给对应层级的智能体处理。
+          - id: tool-subagent
+            name: '@deepseek-ai/dsh-tool-subagent'
+            config:
+              provider: spawn
+              allowedAgentPresets:
+                - hpc-agent
+                - sys-agent
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: tool-schedule
+            name: '@deepseek-ai/dsh-tool-schedule'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: command-goal
+            name: '@deepseek-ai/dsh-command-goal'
+          - id: tool-goal
+            name: '@deepseek-ai/dsh-tool-goal'
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'
+          # 经验沉淀：形成诊断结论后由智能体主动记录为短期记忆（控制台评估晋升）。
+          - id: tool-memory-record
+            name: '@gac2/dsh-aiops-memory-controller/tool'
+
+    # 下层智能体（A2A 委托目标，内部实现，不出现在控制台清单）：
+    # 系统智能体负责系统环境层/硬件层（最终执行层，不再下放）；
+    # HPC 智能体负责应用层/集群管理层，发现根因在系统/硬件层时继续委托系统智能体。
+    - id: preset-sys-agent
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: sys-agent
+        name: 系统智能体
+        description: 系统环境层/硬件层故障诊断，运维智能体的 A2A 委托目标
+        unlisted: true
+        order: 10
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                你是操作系统智能运维平台的系统智能体。
+                你负责系统环境层与硬件层的故障诊断：操作系统配置、内核参数、文件系统、
+                资源限制（ulimit/cgroup）、网络栈、时钟同步、依赖库与驱动版本，
+                以及 CPU（降频、MCE、NUMA 亲和）、内存（ECC、OOM、页错误）、
+                磁盘（SMART、坏道、RAID 与文件系统只读）、IB/RoCE 与以太网链路
+                （丢包、降速、光模块）、GPU/NPU 状态。
+                按"感知—认知—推理—决策—行动—观察"循环定位故障根因并给出处置建议。
+                处理诊断类问题时，先调用 memory_recall 召回历史诊断经验（长期记忆）作参考；
+                形成明确的故障诊断结论后，必须先调用 memory_record 工具沉淀经验（summary 为一句话结论，
+                detail 为完整结论与处置建议），再输出最终答复；日常问答、寒暄或链路测试不要调用这两个工具。
+                你是最终执行层，结论直接返回委托方。不要自称编码智能体。
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:
@@ -106,19 +226,106 @@
               searchTimeoutMs: 60000
           - id: present
             name: '@deepseek-ai/dsh-tool-present'
+          # 经验沉淀：形成诊断结论后由智能体主动记录为短期记忆（控制台评估晋升）。
+          - id: tool-memory-record
+            name: '@gac2/dsh-aiops-memory-controller/tool'
 
-# 新建 Web 会话默认挂载 OS 智能体预设
+    - id: preset-hpc-agent
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: hpc-agent
+        name: HPC 智能体
+        description: 应用层/集群管理层故障诊断，根因位于系统/硬件层时经 A2A 委托系统智能体
+        unlisted: true
+        order: 9
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                你是操作系统智能运维平台的 HPC 智能体。
+                你负责应用层与集群管理层的故障诊断：作业批量失败、节点 NotReady、
+                共享存储抖动、MPI 通信超时、调度器驱逐，以及 Slurm/PBS 队列资源、
+                作业调度异常、资源分配冲突与队列阻塞。
+                按"感知—认知—推理—决策—行动—观察"循环定位故障根因。
+                若判断根因位于系统环境层或硬件层，通过委托接口交给系统智能体处理，
+                并基于其结论给出最终建议。
+                处理诊断类问题时，先调用 memory_recall 召回历史诊断经验（长期记忆）作参考；
+                形成明确的故障诊断结论后，必须先调用 memory_record 工具沉淀经验（summary 为一句话结论，
+                detail 为完整结论与处置建议），再输出最终答复；日常问答、寒暄或链路测试不要调用这两个工具。
+                不要自称编码智能体。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          # A2A 下钻：只许委托系统智能体（下层），不允许横向或反向委托。
+          - id: tool-subagent
+            name: '@deepseek-ai/dsh-tool-subagent'
+            config:
+              provider: spawn
+              allowedAgentPresets:
+                - sys-agent
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: tool-schedule
+            name: '@deepseek-ai/dsh-tool-schedule'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: command-goal
+            name: '@deepseek-ai/dsh-command-goal'
+          - id: tool-goal
+            name: '@deepseek-ai/dsh-tool-goal'
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'
+          # 经验沉淀：形成诊断结论后由智能体主动记录为短期记忆（控制台评估晋升）。
+          - id: tool-memory-record
+            name: '@gac2/dsh-aiops-memory-controller/tool'
+
+# 新建 Web 会话默认挂载运维智能体（注册表种子，启动时由 aiops-agent-controller 注册）
 - id: agent-preset-registry
   config:
-    default: os-agent
-
-# headless（运维 Copilot 链路）身份注入：headless 无预设机制，
-# 基座 system-prompt 的 personaPrefix 即该链路智能体的身份描述
-- id: system-prompt
-  config:
-    personaPrefix: >-
-      你是操作系统智能运维平台的 OS 智能体，底层模型是 {{model}}。
-      你的职责是面向仿真计算集群的系统环境层与硬件层故障开展智能诊断：
-      结合运维知识库与监控数据，按"感知—认知—推理—决策—行动—观察"的
-      循环定位故障根因并给出处置建议。回答时以运维诊断专家的身份组织
-      内容，不要自称编码智能体。
+    default: ops-agent

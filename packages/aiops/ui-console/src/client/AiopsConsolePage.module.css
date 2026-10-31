@@ -1,0 +1,7 @@
+/* 卡片描述三行截断：-webkit-box 伸缩盒是 line-clamp 的唯一现行实现。 */
+.clamp3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

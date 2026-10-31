@@ -29,6 +29,13 @@ export interface AcpConfig {
   model?: string
   /** Maximum summaries returned by one session/list page. */
   sessionListPageSize?: number
+  /**
+   * Also forward live assistant text and reasoning deltas as incremental
+   * `agent_message_chunk` / `agent_thought_chunk` updates. Committed messages
+   * then omit their already-streamed text and thought blocks. Opt in only when
+   * the client renders incrementally; abandoned attempts may leave partial text.
+   */
+  streamAssistant?: boolean
   /** Runtime-only transport override; production uses stdio. */
   stream?: Stream
 }
@@ -141,7 +148,7 @@ export type Config = PresetDefinition
 
 - `inject`: `loader` · `sessionProjections`
 - `refs`: `Volatile` (`@deepseek-ai/cordis`)
-- `source`: [`packages/preset/agent-preset-registry/src/preset.ts:13`](../packages/preset/agent-preset-registry/src/preset.ts)
+- `source`: [`packages/preset/agent-preset-registry/src/preset.ts:15`](../packages/preset/agent-preset-registry/src/preset.ts)
 
 ```ts config-catalog
 /** Registry selection policy. */
@@ -4588,6 +4595,80 @@ export interface Config {
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-workspace-changes -->
+
+<!-- BEGIN GENERATED config-catalog:@gac2/dsh-aiops-agent-controller -->
+<a id="gac2dsh-aiops-agent-controller"></a>
+
+## `@gac2/dsh-aiops-agent-controller`
+
+- `inject`: `agentPresets` · `sessionPersistence`
+- `source`: [`packages/aiops/agent-controller/src/index.ts:49`](../packages/aiops/agent-controller/src/index.ts)
+
+```ts config-catalog
+/** Deployment choices for the console-managed agent registry. */
+export interface Config {
+  /** Registry JSON file; created on first write. */
+  storePath: string
+  /** Preset cloned as the tool/persona template for registered agents. */
+  templatePresetId: string
+  /** Startup deadline for the template preset to appear, in milliseconds. */
+  templateWaitMs: number
+  /** JSON-encoded seed definitions inserted when the registry file does not exist yet. */
+  seedAgentsJson: string
+}
+```
+<!-- END GENERATED config-catalog:@gac2/dsh-aiops-agent-controller -->
+
+<!-- BEGIN GENERATED config-catalog:@gac2/dsh-aiops-auth-relay -->
+<a id="gac2dsh-aiops-auth-relay"></a>
+
+## `@gac2/dsh-aiops-auth-relay`
+
+- `inject`: `webServer` · `credentials` · `connection`
+- `source`: [`packages/aiops/auth-relay/src/index.ts:11`](../packages/aiops/auth-relay/src/index.ts)
+
+```ts config-catalog
+/** Deployment choices for the operations integration routes. */
+export interface Config {
+  /** Base origin of the operations platform, used by the health probe. Required per deployment. */
+  platformOrigin: string
+  /** DSH repository or installation root used to launch the ACP Copilot child. */
+  dshRoot: string
+  /** Workspace shared by ACP Copilot sessions and Web Sessions. */
+  sessionCwd: string
+  /** Clean console URL that the entry redirect carries the process token to. */
+  consoleTarget: string
+  /** Persona/identity patch applied to the acp profile, resolved against dshRoot. */
+  acpPatchPath: string
+  /** Auto-answer policy for the Copilot agent's tool-permission prompts. */
+  permission: CopilotPermission
+  /** Upstream health-check deadline in milliseconds. */
+  requestTimeoutMs: number
+}
+
+/** How the relay answers the agent's tool-permission prompts. */
+export type CopilotPermission = 'allow' | 'reject'
+```
+<!-- END GENERATED config-catalog:@gac2/dsh-aiops-auth-relay -->
+
+<!-- BEGIN GENERATED config-catalog:@gac2/dsh-aiops-log-controller -->
+<a id="gac2dsh-aiops-log-controller"></a>
+
+## `@gac2/dsh-aiops-log-controller`
+
+- `inject`: `sessionQuery` · `aiopsAgentController`
+- `source`: [`packages/aiops/log-controller/src/index.ts:21`](../packages/aiops/log-controller/src/index.ts)
+
+```ts config-catalog
+/** Deployment choices for the agent-activity log projection. */
+export interface Config {
+  /** Newest sessions inspected per query per preset set. */
+  maxSessions: number
+  /** Inner delegation targets whose sessions also feed the log view. */
+  innerPresetIds: string[]
+}
+```
+<!-- END GENERATED config-catalog:@gac2/dsh-aiops-log-controller -->
 
 ## 无配置的可加载插件
 

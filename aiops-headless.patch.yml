@@ -1,11 +1,132 @@
-# 运维 Copilot（headless 链路）专用叠加层：headless 无预设机制，
-# 智能体身份经基座 system-prompt 的 personaPrefix 注入。
-# Web 链路的控制台与 OS 智能体预设见 aiops.patch.yml。
+# 运维 Copilot（ACP 链路）叠加层：无预设机制，运维智能体身份经基座
+# system-prompt 的 personaPrefix 注入；A2A 委托经 insert 追加的
+# agent-preset-registry + 下层智能体预设 + tool-subagent 提供。
+# Web 链路的控制台与智能体预设见 aiops.patch.yml。
 - id: system-prompt
   config:
     personaPrefix: >-
-      你是操作系统智能运维平台的 OS 智能体，底层模型是 {{model}}。
-      你的职责是面向仿真计算集群的系统环境层与硬件层故障开展智能诊断：
-      结合运维知识库与监控数据，按"感知—认知—推理—决策—行动—观察"的
-      循环定位故障根因并给出处置建议。回答时以运维诊断专家的身份组织
-      内容，不要自称编码智能体。
+      你是操作系统智能运维平台的运维智能体。
+      你统一接收集群运维问题并组织诊断：先判断问题所属层级——应用层/集群管理层
+      （作业失败、队列阻塞、调度异常、MPI 通信等）交给 HPC 智能体，
+      系统环境层/硬件层（内核参数、文件系统、CPU/内存/磁盘/链路/GPU 等）交给系统智能体；
+      汇总下层结论并给出最终处置建议。显而易见的问题可直接回答。
+      按"感知—认知—推理—决策—行动—观察"循环工作。不要自称编码智能体。
+
+# A2A 协同：预设注册表 + 两个下层智能体 + 委托工具（仅允许下放，不允许上钻）。
+- insert:
+    - id: agent-preset-registry
+      name: '@deepseek-ai/dsh-agent-preset-registry'
+      config:
+        default: sys-agent
+
+    - id: tool-subagent
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: spawn
+        allowedAgentPresets:
+          - hpc-agent
+          - sys-agent
+
+    # 下层智能体（A2A 委托目标）：系统智能体为最终执行层；
+    # HPC 智能体发现根因在系统/硬件层时继续委托系统智能体。
+    - id: preset-sys-agent
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: sys-agent
+        name: 系统智能体
+        description: 系统环境层/硬件层故障诊断，运维智能体的 A2A 委托目标
+        unlisted: true
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                你是操作系统智能运维平台的系统智能体。
+                你负责系统环境层与硬件层的故障诊断：操作系统配置、内核参数、文件系统、
+                资源限制（ulimit/cgroup）、网络栈、时钟同步、依赖库与驱动版本，
+                以及 CPU（降频、MCE、NUMA 亲和）、内存（ECC、OOM、页错误）、
+                磁盘（SMART、坏道、RAID 与文件系统只读）、IB/RoCE 与以太网链路
+                （丢包、降速、光模块）、GPU/NPU 状态。
+                按"感知—认知—推理—决策—行动—观察"循环定位故障根因并给出处置建议。
+                你是最终执行层，结论直接返回委托方。不要自称编码智能体。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+
+    - id: preset-hpc-agent
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: hpc-agent
+        name: HPC 智能体
+        description: 应用层/集群管理层故障诊断，根因位于系统/硬件层时经 A2A 委托系统智能体
+        unlisted: true
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                你是操作系统智能运维平台的 HPC 智能体。
+                你负责应用层与集群管理层的故障诊断：作业批量失败、节点 NotReady、
+                共享存储抖动、MPI 通信超时、调度器驱逐，以及 Slurm/PBS 队列资源、
+                作业调度异常、资源分配冲突与队列阻塞。
+                按"感知—认知—推理—决策—行动—观察"循环定位故障根因。
+                若判断根因位于系统环境层或硬件层，通过委托接口交给系统智能体处理，
+                并基于其结论给出最终建议。不要自称编码智能体。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          # A2A 下钻：只许委托系统智能体（下层）。
+          - id: tool-subagent
+            name: '@deepseek-ai/dsh-tool-subagent'
+            config:
+              provider: spawn
+              allowedAgentPresets:
+                - sys-agent
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000

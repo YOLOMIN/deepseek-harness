@@ -1,5 +1,5 @@
 ---
-description: "Cordis routes for GAC2 console entry, ticket pass-through, platform health checks, and headless Copilot."
+description: "Cordis routes for GAC2 console entry, ticket pass-through, platform health checks, and the ACP Copilot channel."
 kind: "package-reference"
 ---
 
@@ -9,9 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Mount the GAC2 operations integration on an isolated DSH `webServer`. It provides console redirects (injecting the dsh launch token and passing through the platform-issued sign-in ticket), platform health checks, and headless Copilot forwarding without a separate relay process.
-
-Platform account integration does not pass through this plugin: the operations platform exposes the authentication adapter protocol as standard endpoints (`POST /api/aiops/login` for password authentication, `POST /api/aiops/ticket` for ticket issuance, `POST /api/aiops/ticket-login` for ticket redemption, `GET /api/aiops/health` for health checks). The console's "operations platforms" settings point directly at those platform endpoints, so swapping the console implementation keeps the integration protocol unchanged.
+Mount the GAC2 operations integration on an isolated DSH `webServer`: console redirects (injecting the dsh launch token, passing through platform sign-in tickets), platform health checks, and the Copilot SSE channel without a separate relay process. Copilot prompts run on one persistent ACP child (`dsh --profile acp`): each browser conversation is a standard ACP session, follow-ups skip the cold start, disconnects become `session/cancel`, and a child crash respawns on the next prompt. Platform account integration uses the operations platform's standard `/api/aiops/*` endpoints directly, not this plugin, so swapping the console keeps the protocol unchanged.
 
 ## Table of Contents
 
@@ -24,21 +22,20 @@ Platform account integration does not pass through this plugin: the operations p
 
 Mount `@gac2/dsh-aiops-auth-relay` beside `@deepseek-ai/dsh-host-webserver` in a Cordis group that isolates `webServer`. `aiops.patch.yml` uses `127.0.0.1:3081`; the primary Web application continues on `3080`.
 
-Configuration fields are `platformOrigin`, `dshRoot`, `sessionCwd`, `consoleLogPath`, and `requestTimeoutMs`. Defaults target the current GAC2 platform and checkout. The plugin reads model credentials through `ctx.credentials`; platform passwords, cookies, and MCP tokens do not enter ordinary settings.
+Configuration fields are `platformOrigin` (required per deployment), `dshRoot`, `sessionCwd`, `consoleTarget`, `acpPatchPath`, `permission` (auto-answer policy for the agent's tool-permission prompts), and `requestTimeoutMs`, all set by the mounting patch such as `aiops.patch.yml`. The redirect token comes from the in-process `connection` service, and model credentials are read through `ctx.credentials`; platform passwords, cookies, and MCP tokens do not enter ordinary settings.
 
 ## Model Experience
 
-Copilot forwards user messages to the normal `headless` profile with `aiops-headless.patch.yml`. NDJSON `session`, text, thinking, tool, status, final, and error events become SSE events. Each request launches a child process, and disposal or client disconnect stops it.
+Indirectly, through the persistent `acp` profile child driving Copilot sessions: standard ACP message, thought, and tool-lifecycle updates become SSE events, while model context stays owned by the acp profile and its persona patch.
 
 #### KV Cache effect
 
-The plugin adds no model-visible prefix. Model context is owned by the normal headless profile and its persona.
+The plugin adds no model-visible prefix. Model context is owned by the acp profile and its persona patch.
 
 ## Known Limitations and Deferred Work
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- The console redirect reads the current launch token from the configured DSH startup log. Rotating that log requires restarting DSH before console entry works again.
 - MCP tool registration into agent presets is configured separately from these integration routes.
 
 <a id="dev-note"></a>

@@ -1,41 +1,45 @@
 /** Operations console entry and Copilot routes for GAC2 AIOps. */
-import { spawn, type ChildProcess } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-client-connection'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import z from '@deepseek-ai/schemastery'
+import { AcpCopilotPool, type CopilotPermission, type SseEvent } from './acp-copilot.ts'
 
 /** Deployment choices for the operations integration routes. */
 export interface Config {
-  /** Base origin of the operations platform, used by the health probe. */
+  /** Base origin of the operations platform, used by the health probe. Required per deployment. */
   platformOrigin: string
-  /** DSH repository or installation root used to launch headless Copilot turns. */
+  /** DSH repository or installation root used to launch the ACP Copilot child. */
   dshRoot: string
-  /** Workspace shared by headless Copilot and Web Sessions. */
+  /** Workspace shared by ACP Copilot sessions and Web Sessions. */
   sessionCwd: string
-  /** DSH startup log containing the current browser launch token. */
-  consoleLogPath: string
+  /** Clean console URL that the entry redirect carries the process token to. */
+  consoleTarget: string
+  /** Persona/identity patch applied to the acp profile, resolved against dshRoot. */
+  acpPatchPath: string
+  /** Auto-answer policy for the Copilot agent's tool-permission prompts. */
+  permission: CopilotPermission
   /** Upstream health-check deadline in milliseconds. */
   requestTimeoutMs: number
 }
 
 /** Validated deployment choices. */
 export const Config = z.object({
-  platformOrigin: z.string().pattern(/^https?:\/\/[^\s]+$/u).default('http://192.168.10.95:9091'),
+  platformOrigin: z.string().pattern(/^https?:\/\/[^\s]+$/u),
   dshRoot: z.string().min(1).default(process.cwd()),
   sessionCwd: z.string().min(1).default(process.cwd()),
-  consoleLogPath: z.string().min(1).default(resolve(process.cwd(), '..', 'dsh-web.log')),
+  consoleTarget: z.string().pattern(/^https?:\/\/[^\s]+$/u).default('http://127.0.0.1:3080/'),
+  acpPatchPath: z.string().min(1).default('aiops-headless.patch.yml'),
+  permission: z.union(['allow', 'reject']).default('allow'),
   requestTimeoutMs: z.number().min(1).max(120_000).default(3_000),
 })
 
 const MAX_BODY_BYTES = 64 * 1024
 
 /** Services required by the integration routes. */
-export const inject = ['webServer', 'credentials']
+export const inject = ['webServer', 'credentials', 'connection']
 
 function cors(res: ServerResponse): void {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -73,12 +77,20 @@ async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
  * 平台账户体系对接（账号口令认证 /api/aiops/login、免登票据 /api/aiops/ticket 与
  * /api/aiops/ticket-login、健康检查 /api/aiops/health）由运维平台以标准接口形式提供，
  * 本中继不再承担认证适配职责，仅保留两类控制端自身能力：
- *   - /console：平台"智能运维控制台入口"跳转链路，向重定向注入 dsh 访问 token，
- *     并透传平台签发的免登票据（pf_ticket）与目标页签（pf_tab）；
- *   - /api/aiops/chat：运维 Copilot 流式诊断通道（SSE），spawn headless 推理子进程。
+ *   - /console：平台"智能运维控制台入口"跳转链路，经同进程 connection 服务的
+ *     authenticatedUrl 注入 dsh 访问令牌，并透传平台签发的免登票据（pf_ticket）
+ *     与目标页签（pf_tab）；
+ *   - /api/aiops/chat：运维 Copilot 流式诊断通道（SSE），由常驻 ACP 子进程
+ *     （dsh --profile acp）按会话承载，替换逐消息冷启动。
  */
 export function apply(ctx: Context, config: Config): void {
-  const children = new Set<ChildProcess>()
+  const copilot = new AcpCopilotPool({
+    dshRoot: config.dshRoot,
+    sessionCwd: config.sessionCwd,
+    patchPath: config.acpPatchPath,
+    permission: config.permission,
+    resolveApiKey: async () => (await ctx.credentials.resolve(credentialRef('DEEPSEEK_API_KEY')))?.value,
+  })
 
   const health = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
@@ -89,19 +101,14 @@ export function apply(ctx: Context, config: Config): void {
     }
   }
 
-  const consoleEntry = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  const consoleEntry = (req: IncomingMessage, res: ServerResponse): void => {
     try {
-      const log = await readFile(config.consoleLogPath, 'utf8')
-      const matches = [...log.matchAll(/token=[A-Za-z0-9_-]{20,}/g)]
-      const latest = matches.at(-1)
-      if (latest === undefined) throw new Error('未在 dsh-web.log 中找到 token')
-      const token = latest[0]
       const url = new URL(req.url ?? '/', 'http://127.0.0.1')
       // 免登票据由平台标准接口 /api/aiops/ticket 在平台会话内签发，此处仅透传给控制台页面；
       // 控制台挂载后凭票据向平台 /api/aiops/ticket-login 核销，换取账号与角色完成免登
       const ticket = url.searchParams.get('ticket')
       const tab = url.searchParams.get('tab')
-      const headers: Record<string, string | string[]> = { Location: `http://127.0.0.1:3080/?${token}` }
+      const headers: Record<string, string | string[]> = { Location: ctx.connection.authenticatedUrl(config.consoleTarget) }
       const cookies: string[] = []
       if (ticket && /^[A-Za-z0-9_-]{10,200}$/.test(ticket)) {
         cookies.push(`pf_ticket=${ticket}; Path=/; Max-Age=60; SameSite=Lax`)
@@ -124,57 +131,14 @@ export function apply(ctx: Context, config: Config): void {
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
     })
-    const send = (event: string, data: unknown): void => {
-      if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+    const send = (frame: SseEvent): void => {
+      if (!res.writableEnded) res.write(`event: ${frame.event}\ndata: ${JSON.stringify(frame.data)}\n\n`)
     }
-    const args = [
-      '--import', pathToFileURL(join(config.dshRoot, 'node_modules', 'tsx', 'dist', 'esm', 'index.mjs')).href,
-      join(config.dshRoot, 'apps/cli/src/bin.ts'),
-      '--profile', 'headless', '--patch', join(config.dshRoot, 'aiops-headless.patch.yml'), '--json',
-    ]
-    if (typeof payload.sessionId === 'string' && payload.sessionId) args.push('--session-id', payload.sessionId)
-    args.push(message)
-    const childEnv: NodeJS.ProcessEnv = { ...process.env, TSX_TSCONFIG_PATH: join(config.dshRoot, 'tsconfig.base.json') }
-    const credential = await ctx.credentials.resolve(credentialRef('DEEPSEEK_API_KEY'))
-    if (credential) childEnv.DEEPSEEK_API_KEY = credential.value
-    const child = spawn(process.execPath, args, { cwd: config.sessionCwd, env: childEnv })
-    children.add(child)
-    child.once('close', () => { children.delete(child) })
-    let buffer = ''
-    let finalSeen = false
-    child.stdout.on('data', (chunk: Buffer | string) => {
-      buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
-      let index: number
-      while ((index = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, index).trim()
-        buffer = buffer.slice(index + 1)
-        if (!line) continue
-        let event: Record<string, unknown>
-        try { event = JSON.parse(line) as Record<string, unknown> } catch { continue }
-        if (event.type === 'session') send('session', { sessionId: event.sessionId || event.id || event.session })
-        else if (event.type === 'text' && event.text) send('delta', { kind: 'text', text: event.text })
-        else if (event.type === 'thinking' && event.text) send('delta', { kind: 'thinking', text: event.text })
-        else if (event.type === 'tool_call') send('tool', { phase: 'call', name: event.name || event.tool, args: event.args })
-        else if (event.type === 'tool_result') send('tool', { phase: 'result', name: event.name || event.tool })
-        else if (event.type === 'status' && event.text) send('status', { text: event.text })
-        else if (event.type === 'final') { finalSeen = true; send('final', { text: event.text || '' }) }
-        else if (event.type === 'error') send('error', { message: event.message || '运行错误' })
-      }
-    })
-    let errorBuffer = ''
-    child.stderr.on('data', (chunk: Buffer | string) => {
-      errorBuffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
-    })
-    let childDone = false
-    child.on('close', (code: number | null) => {
-      childDone = true
-      if (!finalSeen) {
-        if (code === 0) send('final', { text: '' })
-        else send('error', { message: `诊断执行异常退出（${code}）：${errorBuffer.trim().split('\n').pop() || '未知错误'}`.slice(0, 300) })
-      }
-      if (!res.writableEnded) res.end()
-    })
-    res.on('close', () => { if (!childDone) child.kill() })
+    const ac = new AbortController()
+    res.on('close', () => { ac.abort() })
+    const sessionId = typeof payload.sessionId === 'string' && payload.sessionId !== '' ? payload.sessionId : undefined
+    await copilot.prompt(sessionId === undefined ? { message } : { message, sessionId }, send, ac.signal)
+    if (!res.writableEnded) res.end()
   }
 
   const routes: Array<{ path: string; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void }> = [
@@ -195,7 +159,6 @@ export function apply(ctx: Context, config: Config): void {
     }), `aiops-auth-relay: ${route.path}`)
   }
   ctx.effect(() => () => {
-    for (const child of children) child.kill()
-    children.clear()
+    void copilot.dispose()
   }, 'aiops-auth-relay: dispose')
 }

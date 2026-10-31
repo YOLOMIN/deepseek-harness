@@ -1,0 +1,31 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/aiops/log-controller/README.md
+/:
+  en: e5c6d47da6902118
+  zh: ad0917773c526c55
+/gac2-dsh-aiops-log-controller:
+  en: 70cd50910c85b46b
+  zh: 5e11c436d3f78016
+/gac2-dsh-aiops-log-controller/summary:
+  en: 9ccae7f4baa6b029
+  zh: b602a29f86e684ee
+/gac2-dsh-aiops-log-controller/table-of-contents:
+  en: 4e53164159b5ce41
+  zh: ea880207871b6cb4
+/gac2-dsh-aiops-log-controller/use-this-package:
+  en: 2741b8c3486c695f
+  zh: 4231dd64648741db
+/gac2-dsh-aiops-log-controller/model-experience:
+  en: 6b5219c820030fe3
+  zh: 5187abe0713210a7
+/gac2-dsh-aiops-log-controller/model-experience/kv-cache-effect:
+  en: ca3015e252db0114
+  zh: 6000b452cc4d0574
+/gac2-dsh-aiops-log-controller/known-limitations-and-deferred-work:
+  en: 14a520126c3216ff
+  zh: a82e622dd30c5004
+/gac2-dsh-aiops-log-controller/known-limitations-and-deferred-work/dev-note:
+  en: 7fb3692a3d29ca1c
+  zh: 93030a95c67e8ed4

@@ -1,0 +1,43 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/aiops/memory-controller/README.md
+/:
+  en: 6d1371d5d133cbf5
+  zh: cdb10f435e80ce48
+/gac2-dsh-aiops-memory-controller:
+  en: 640e662c832655c8
+  zh: 725397f2bff32349
+/gac2-dsh-aiops-memory-controller/summary:
+  en: 56ada9220252714f
+  zh: eecedba72ca2d343
+/gac2-dsh-aiops-memory-controller/table-of-contents:
+  en: 4e53164159b5ce41
+  zh: adc27a3c31c4d4ee
+/gac2-dsh-aiops-memory-controller/use-this-package:
+  en: dac51b978fca335d
+  zh: 624a7816c0ad4f67
+/gac2-dsh-aiops-memory-controller/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/gac2-dsh-aiops-memory-controller/model-experience/memory-record-memory-recall-tools:
+  en: 76847acd65bf763a
+  zh: 99a5baa7f4f12b7b
+/gac2-dsh-aiops-memory-controller/model-experience/memory-record-memory-recall-tools/what-the-model-sees:
+  en: e502308f14cda2d7
+  zh: 417d32a5bec446d2
+/gac2-dsh-aiops-memory-controller/model-experience/memory-record-memory-recall-tools/what-the-model-sees/tool-descriptions:
+  en: f42c4bfd322e6bc0
+  zh: 7a970f8bcfc55dec
+/gac2-dsh-aiops-memory-controller/model-experience/memory-record-memory-recall-tools/token-effect:
+  en: 86ff0308ff2ad749
+  zh: b11f00681ff8e547
+/gac2-dsh-aiops-memory-controller/model-experience/memory-record-memory-recall-tools/kv-cache-effect:
+  en: 8793f68412e173e5
+  zh: 20d38f7e5186d4c0
+/gac2-dsh-aiops-memory-controller/known-limitations-and-deferred-work:
+  en: 8ac0b2f221e4c78c
+  zh: 99f109d1ad5a171b
+/gac2-dsh-aiops-memory-controller/known-limitations-and-deferred-work/dev-note:
+  en: 1def161bbff90cb0
+  zh: 202bdbbca49fb919

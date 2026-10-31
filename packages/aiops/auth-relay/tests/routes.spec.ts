@@ -1,5 +1,5 @@
 import { createServer } from 'node:http'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
@@ -24,16 +24,17 @@ async function fixture(healthy = true) {
   cleanups.push(async () => {
     await new Promise<void>((resolve) => { upstream.close(() => { resolve() }); upstream.closeAllConnections() })
   })
-  const consoleLogPath = join(home, 'dsh-web.log')
-  await writeFile(consoleLogPath, 'dsh web: http://127.0.0.1:3080/?token=test_token_12345678901234567890\n')
   const ctx = new Context()
+  ctx.provide('connection', {
+    authenticatedUrl: (base: string) => `${base}?token=test_token_12345678901234567890`,
+  } as never)
   const web = ctx.plugin(WebServer, { host: '127.0.0.1', port: 0 })
   await web
   const credentials = ctx.plugin(LocalCredentialProvider, { path: join(home, 'credentials.yaml'), watch: false })
   await credentials
   const plugin = ctx.plugin({ Config, apply, inject }, {
     platformOrigin: healthy ? `http://127.0.0.1:${address.port}` : 'http://127.0.0.1:1',
-    dshRoot: process.cwd(), sessionCwd: process.cwd(), consoleLogPath,
+    dshRoot: process.cwd(), sessionCwd: process.cwd(), consoleTarget: 'http://127.0.0.1:3080/',
   })
   await plugin
   cleanups.push(async () => { await plugin.dispose(); await credentials.dispose(); await web.dispose(); await ctx.fiber.dispose() })

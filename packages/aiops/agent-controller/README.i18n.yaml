@@ -1,0 +1,31 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/aiops/agent-controller/README.md
+/:
+  en: 4e342aec850cd728
+  zh: abb7c7c1ddb6b9c1
+/gac2-dsh-aiops-agent-controller:
+  en: 4efd620fdf8d174b
+  zh: c7d79ae85482f8b0
+/gac2-dsh-aiops-agent-controller/summary:
+  en: 0d96cdd0133ed2be
+  zh: 9b502ca22d27a282
+/gac2-dsh-aiops-agent-controller/table-of-contents:
+  en: 4e53164159b5ce41
+  zh: ea880207871b6cb4
+/gac2-dsh-aiops-agent-controller/use-this-package:
+  en: 2650e9aaa85be0ee
+  zh: e59996d2c6a19a9a
+/gac2-dsh-aiops-agent-controller/model-experience:
+  en: c260594b64dcbbcb
+  zh: 635dd1df42fe88ab
+/gac2-dsh-aiops-agent-controller/model-experience/kv-cache-effect:
+  en: 7732bf89c736b290
+  zh: cf8302a82270037f
+/gac2-dsh-aiops-agent-controller/known-limitations-and-deferred-work:
+  en: 33eb690408d21063
+  zh: b785d0c8aadd2e2f
+/gac2-dsh-aiops-agent-controller/known-limitations-and-deferred-work/dev-note:
+  en: ec380cee1db12cfb
+  zh: 131ede0fbe81f4a4

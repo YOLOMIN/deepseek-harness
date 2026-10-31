@@ -88,6 +88,15 @@
       "path": "../settings-controller"
     },
     {
+      "path": "../../aiops/agent-controller"
+    },
+    {
+      "path": "../../aiops/log-controller"
+    },
+    {
+      "path": "../../aiops/memory-controller"
+    },
+    {
       "path": "../workspace-controller/tsconfig.client.json"
     },
     {

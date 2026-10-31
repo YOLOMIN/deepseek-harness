@@ -9,6 +9,7 @@
   "references": [
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
+    { "path": "../../client/connection/tsconfig.host.json" },
     { "path": "../../host/webserver" },
     { "path": "../../credentials/credentials" },
     { "path": "../../credentials/credentials-local" }

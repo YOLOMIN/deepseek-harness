@@ -17,11 +17,15 @@
     "bundle": "tsdown"
   },
   "license": "MIT",
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.4.0"
+  },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:~"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:~",
+    "@deepseek-ai/dsh-client-connection": "workspace:*",
     "@deepseek-ai/dsh-credentials": "workspace:*",
     "@deepseek-ai/dsh-credentials-local": "workspace:*",
     "@deepseek-ai/dsh-host-webserver": "workspace:*",
