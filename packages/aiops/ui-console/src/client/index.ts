@@ -13,6 +13,7 @@ import { AiopsPanelIcon } from './AiopsPanelIcon.tsx'
 import { createAiopsAgentsFace } from './agents-face.ts'
 import { createAiopsLogsFace } from './logs-face.ts'
 import { createAiopsMemoryFace } from './memory-face.ts'
+import { createAiopsSkillsFace } from './skills-face.ts'
 import { setInitialTab, setLayoutService } from './initial-tab.ts'
 import { en, NS, zh, type AiopsLocaleKey } from './locales.ts'
 
@@ -29,7 +30,7 @@ export { NS }
 export const PANEL_ID = 'aiops' as MainPanelId
 
 /** Services required by the sidebar registration and the page. */
-export const inject = ['slots', 'locale', 'layout', 'remote', 'remote.aiopsAgents', 'remote.aiopsLogs', 'remote.aiopsMemory', 'uiWorkspace']
+export const inject = ['slots', 'locale', 'layout', 'remote', 'remote.aiopsAgents', 'remote.aiopsLogs', 'remote.aiopsMemory', 'remote.aiopsSkills', 'uiWorkspace']
 
 /**
  * Contribute the aiops entry to the sidebar with the console page it opens.
@@ -44,7 +45,12 @@ export function apply(ctx: ClientContext): void {
     name: 'main',
     key: PANEL_ID,
     locale: NS,
-    inject: () => ({ agents: createAiopsAgentsFace(ctx), logs: createAiopsLogsFace(ctx), memory: createAiopsMemoryFace(ctx) }),
+    inject: () => ({
+      agents: createAiopsAgentsFace(ctx),
+      logs: createAiopsLogsFace(ctx),
+      memory: createAiopsMemoryFace(ctx),
+      skills: createAiopsSkillsFace(ctx),
+    }),
   }, AiopsConsolePage))
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
     name: 'sidebar.panellist',

@@ -114,6 +114,8 @@
       "@gac2/dsh-aiops-memory-controller": ["./packages/aiops/memory-controller/src/index.ts"],
       "@gac2/dsh-aiops-memory-controller/types": ["./packages/aiops/memory-controller/src/types.ts"],
       "@gac2/dsh-aiops-memory-controller/tool": ["./packages/aiops/memory-controller/src/tool.ts"],
+      "@gac2/dsh-aiops-skill-controller": ["./packages/aiops/skill-controller/src/index.ts"],
+      "@gac2/dsh-aiops-skill-controller/types": ["./packages/aiops/skill-controller/src/types.ts"],
       "@gac2/dsh-client-ui-aiops": ["./packages/aiops/ui-console/src/index.ts"],
       "@gac2/dsh-client-ui-aiops/client": ["./packages/aiops/ui-console/src/client/index.ts"],
       "@deepseek-ai/dsh-hmr": ["./packages/boot/hmr/src"],

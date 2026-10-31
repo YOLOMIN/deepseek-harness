@@ -1352,6 +1352,22 @@ importers:
         specifier: workspace:*
         version: link:../agent-controller
 
+  packages/aiops/skill-controller:
+    dependencies:
+      '@deepseek-ai/dsh-typert-protocol':
+        specifier: workspace:*
+        version: link:../../typert/protocol
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+
   packages/aiops/ui-console:
     devDependencies:
       '@deepseek-ai/cordis':
@@ -1387,6 +1403,9 @@ importers:
       '@gac2/dsh-aiops-memory-controller':
         specifier: workspace:*
         version: link:../memory-controller
+      '@gac2/dsh-aiops-skill-controller':
+        specifier: workspace:*
+        version: link:../skill-controller
       react:
         specifier: ^18.2.0
         version: 18.3.1
@@ -1668,6 +1687,9 @@ importers:
       '@gac2/dsh-aiops-memory-controller':
         specifier: workspace:*
         version: link:../../aiops/memory-controller
+      '@gac2/dsh-aiops-skill-controller':
+        specifier: workspace:*
+        version: link:../../aiops/skill-controller
       zod:
         specifier: 4.4.3
         version: 4.4.3
@@ -3286,6 +3308,9 @@ importers:
       '@gac2/dsh-aiops-memory-controller':
         specifier: workspace:*
         version: link:../../aiops/memory-controller
+      '@gac2/dsh-aiops-skill-controller':
+        specifier: workspace:*
+        version: link:../../aiops/skill-controller
       '@gac2/dsh-client-ui-aiops':
         specifier: workspace:*
         version: link:../../aiops/ui-console

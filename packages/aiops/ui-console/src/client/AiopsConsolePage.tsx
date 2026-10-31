@@ -11,9 +11,11 @@ import { consumeInitialTab } from './initial-tab.ts'
 import type { AiopsAgentsFace } from './agents-face.ts'
 import type { AiopsLogsFace } from './logs-face.ts'
 import type { AiopsMemoryFace } from './memory-face.ts'
+import type { AiopsSkillsFace } from './skills-face.ts'
 import type { AiopsAgentRow } from '@gac2/dsh-aiops-agent-controller/types'
 import type { AiopsLogKind, AiopsLogLevel, AiopsLogPage, AiopsLogRow } from '@gac2/dsh-aiops-log-controller/types'
 import type { AiopsMemoryDetail, AiopsMemoryKind, AiopsMemoryPage, AiopsMemoryRow, AiopsRecallConfig } from '@gac2/dsh-aiops-memory-controller/types'
+import type { AiopsSkillPage, AiopsSkillRow, AiopsSkillStatus } from '@gac2/dsh-aiops-skill-controller/types'
 import type { AiopsLocaleKey } from './locales.ts'
 import {
   IconDatabaseOutlineRegular,
@@ -478,73 +480,136 @@ function RagTab({ role }: { role: Role }) {
   )
 }
 
-/* ---------- skills 管理（卡片内安装/卸载，分页；按账户权限过滤） ---------- */
-function SkillsTab({ role }: { role: Role }) {
-  const [discover, setDiscover] = useState(true)
-  const [invoke, setInvoke] = useState(true)
-  const skills = [
-    { scope: 'os' as Scope, card: (
-      <ItemCard
-        icon="诊" iconColor="#5b6ee1" name="节点掉线诊断" meta="skill-node-down · v1.4"
-        desc="节点 down / 失联告警触发：依次执行状态查询、误码指标采集与链路检查，输出根因与处置建议。"
-        tags={[{ color: V.success, text: '已加载' }]}
-        source="来自 技能库"
-        actions={<Btn>卸载</Btn>}
-        highlight
-      />
-    ) },
-    { scope: 'hpc' as Scope, card: (
-      <ItemCard
-        icon="链" iconColor="#2ea44f" name="IB 链路诊断" meta="skill-ib-diag · v1.2"
-        desc="IB 计数器异常触发：采集端口误码与链路抖动指标，定位端口 / 线缆 / 交换机侧根因。"
-        tags={[{ color: V.success, text: '已加载' }]}
-        source="来自 技能库"
-        actions={<Btn>卸载</Btn>}
-      />
-    ) },
-    { scope: 'shared' as Scope, card: (
-      <ItemCard
-        icon="温" iconColor="#b26a00" name="GPU 温度排查" meta="skill-gpu-temp · v1.1"
-        desc="温度超阈值告警触发：检查风扇转速、防尘网与功耗曲线，输出散热处置建议。"
-        tags={[{ color: V.success, text: '已加载' }]}
-        source="来自 技能库"
-        actions={<Btn>卸载</Btn>}
-      />
-    ) },
-    { scope: 'os' as Scope, card: (
-      <ItemCard
-        icon="储" iconColor="#7a52c9" name="存储挂载只读恢复" meta="skill-mount-ro · v1.0"
-        desc="挂载点只读告警触发：检查存储端连接数与挂载参数，执行重挂载恢复流程。"
-        tags={[{ color: V.warn, text: '未加载' }]}
-        source="来自 技能库"
-        actions={<Btn primary>安装</Btn>}
-      />
-    ) },
-  ].filter(s => vis(s.scope, role))
+/* ---------- skills 管理（Nacos 技能库清单 + 本地安装/卸载，真实分页） ---------- */
+const SKILL_STATUS_LABELS: Record<AiopsSkillStatus, string> = { editing: '编辑中', reviewing: '审核中', online: '已发布', offline: '已下线' }
+const SKILL_PAGE_SIZE = 8
+
+function SkillsTab({ face }: { face: AiopsSkillsFace }) {
+  const [keyword, setKeyword] = useState('')
+  const [page, setPage] = useState(1)
+  const [data, setData] = useState<AiopsSkillPage | undefined>(undefined)
+  const [querying, setQuerying] = useState(false)
+  const [paging, setPaging] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [uninstalling, setUninstalling] = useState<AiopsSkillRow | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const runQuery = useCallback(async (targetPage: number, intent: 'query' | 'page' = 'query') => {
+    const setBusyFlag = intent === 'page' ? setPaging : setQuerying
+    setBusyFlag(true)
+    try {
+      const result = await face.listSkills({
+        ...(keyword.trim() === '' ? {} : { keyword: keyword.trim() }),
+        page: targetPage,
+        pageSize: SKILL_PAGE_SIZE,
+      })
+      setData(result)
+      setPage(result.page)
+      setError(null)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusyFlag(false)
+    }
+  }, [face, keyword])
+
+  useEffect(() => { void runQuery(1, 'page') }, []) // 仅挂载时首查（静默）；筛选变化由“查询”按钮触发
+
+  const install = async (row: AiopsSkillRow) => {
+    if (busy) return
+    setBusy(true)
+    try {
+      await face.installSkill(row.name)
+      await runQuery(page, 'page')
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const confirmUninstall = async () => {
+    if (uninstalling === null || busy) return
+    setBusy(true)
+    try {
+      await face.uninstallSkill(uninstalling.name)
+      setUninstalling(null)
+      await runQuery(page, 'page')
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / SKILL_PAGE_SIZE))
+
   return (
     <div style={{ display: 'grid', gap: 12 }}>
-      <FuncCard name="skill 安装卸载" kind="manage">
+      <div style={card}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-          <span style={{ ...card, padding: '4px 10px', fontSize: 12, color: V.text3, minWidth: 180 }}>查询：skill 名称 / 标识 / 能力标签</span>
-          <Btn>查询</Btn>
-          <span style={{ fontSize: 12, color: V.text3 }}>技能库：nacos 注册中心 · 当前可见 {skills.length} 个</span>
-          <span style={{ marginLeft: 'auto', fontSize: 12, color: V.text3 }}>安装 / 卸载即时生效，无需重启</span>
+          <input
+            value={keyword}
+            onChange={(e) => { setKeyword(e.target.value) }}
+            onKeyDown={(e) => { if (e.key === 'Enter') void runQuery(1) }}
+            placeholder="查询：skill 名称 / 描述"
+            style={{ padding: '5px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, minWidth: 200, background: 'transparent', color: V.text }}
+          />
+          <Btn primary disabled={querying} onClick={() => { void runQuery(1) }}>{querying ? '查询中…' : '查询'}</Btn>
+          <span style={{ marginLeft: 'auto', fontSize: 12, color: V.text3 }}>
+            技能库：nacos 注册中心 · 已安装 {data?.installedCount ?? '…'} / 共 {data?.total ?? '…'} 个 · 安装/卸载即时生效，无需重启
+          </span>
         </div>
-        <div style={grid}>{skills.map((s, i) => <span key={i} style={{ display: 'contents' }}>{s.card}</span>)}</div>
-        <Pager total={skills.length} unit="个 skill" />
-      </FuncCard>
-      <FuncCard name="skill 发现" kind="runtime">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <Note>监听技能库（nacos）注册信息，自动扫描发现可用 skill 并按需读取 skill 定义；清单支持按标识、能力标签查询。</Note>
-          <Switch on={discover} onChange={setDiscover} label="自动发现（监听技能库）" />
+        {error !== null && <div style={{ fontSize: 12.5, color: V.error, marginBottom: 10 }}>{error}</div>}
+        {data === undefined && error === null && <div style={{ fontSize: 12.5, color: V.text3 }}>加载中…</div>}
+        {data !== undefined && data.total === 0 && (
+          <div style={{ fontSize: 12.5, color: V.text3 }}>技能库暂无匹配 skill，调整关键字后重试。</div>
+        )}
+        {data !== undefined && data.total > 0 && (
+          <div style={grid}>
+            {data.rows.map(row => (
+              <ItemCard
+                key={row.name}
+                icon={row.name.replace(/^skill-/, '').slice(0, 1)} iconColor={row.installed ? '#5b6ee1' : '#8a94a6'}
+                name={row.name} meta={`${row.name} · ${row.version}`}
+                desc={row.description}
+                tags={[
+                  { color: row.installed ? V.success : V.text3, text: row.installed ? '已加载' : '未加载' },
+                  { color: V.text3, text: SKILL_STATUS_LABELS[row.status] },
+                ]}
+                source="来自 技能库 nacos"
+                highlight={row.installed}
+                actions={row.installed
+                  ? <Btn onClick={() => { setUninstalling(row) }}>卸载</Btn>
+                  : <Btn primary disabled={busy} onClick={() => { void install(row) }}>安装</Btn>}
+              />
+            ))}
+          </div>
+        )}
+        <Pager
+          total={data?.total ?? 0}
+          unit="个 skill"
+          page={page}
+          pages={totalPages}
+          busy={querying || paging}
+          onPage={(next) => { void runQuery(next, 'page') }}
+        />
+      </div>
+
+      {uninstalling !== null && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
+          <div style={{ ...card, width: 380, padding: '16px 18px', display: 'grid', gap: 10, boxShadow: '0 12px 40px rgba(0,0,0,.28)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: V.text }}>卸载 skill</div>
+            <div style={{ fontSize: 13, color: V.text2, lineHeight: 1.7 }}>
+              确认卸载「{uninstalling.name}」？将从本机技能目录移除，智能体后续会话不再命中；技能库中的注册条目保留。
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Btn onClick={() => { setUninstalling(null) }}>取消</Btn>
+              <Btn danger onClick={() => { void confirmUninstall() }}>{busy ? '卸载中…' : '确认卸载'}</Btn>
+            </div>
+          </div>
         </div>
-      </FuncCard>
-      <FuncCard name="skill 调用" kind="runtime">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <Note>根据任务意图匹配命中 skill，解析定义文件并按步骤时序编排执行（含参数校验与分支判断），执行结果回传推理决策。</Note>
-          <Switch on={invoke} onChange={setInvoke} label="按任务意图自动调用 skill" />
-        </div>
-      </FuncCard>
+      )}
     </div>
   )
 }
@@ -1085,7 +1150,7 @@ function McpTab({ role }: { role: Role }) {
 const TABS = [
   { key: 'agents', label: '智能体管理', Icon: IconAgentPresetOutlineRegular, View: undefined },
   { key: 'rag', label: 'RAG 管理', Icon: IconDatabaseOutlineRegular, View: RagTab },
-  { key: 'skills', label: 'skills 管理', Icon: IconSkillOutlineRegular, View: SkillsTab },
+  { key: 'skills', label: 'skills 管理', Icon: IconSkillOutlineRegular, View: undefined },
   { key: 'logs', label: '日志管理', Icon: IconChecklistOutlineRegular, View: undefined },
   { key: 'memory', label: '记忆管理', Icon: IconThinkOutlineRegular, View: undefined },
   { key: 'mcp', label: 'MCP 接口管理', Icon: IconApiOutlineRegular, View: McpTab },
@@ -1117,8 +1182,9 @@ export function AiopsConsolePage(props: {
   agents: AiopsAgentsFace
   logs: AiopsLogsFace
   memory: AiopsMemoryFace
+  skills: AiopsSkillsFace
 }) {
-  const { t, agents: agentsFace, logs: logsFace, memory: memoryFace } = props
+  const { t, agents: agentsFace, logs: logsFace, memory: memoryFace, skills: skillsFace } = props
   // 初始页签：平台入口页跳转指定（pf_tab Cookie → consumeInitialTab），默认智能体管理
   const [tab, setTab] = useState<TabKey>(() => {
     const v = consumeInitialTab()
@@ -1175,9 +1241,11 @@ export function AiopsConsolePage(props: {
             ? <AgentsTab face={agentsFace} />
             : tab === 'logs'
               ? <LogsTab face={logsFace} />
-              : tab === 'memory' || Active === undefined
-                ? <MemoryTab face={memoryFace} />
-                : <Active role={role} />}
+              : tab === 'skills'
+                ? <SkillsTab face={skillsFace} />
+                : tab === 'memory' || Active === undefined
+                  ? <MemoryTab face={memoryFace} />
+                  : <Active role={role} />}
         </>
       )}
     </div>

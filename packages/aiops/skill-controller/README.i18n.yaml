@@ -1,0 +1,31 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/aiops/skill-controller/README.md
+/:
+  en: 766c4dbbb53c5b2d
+  zh: 70e3058eaf61e8f6
+/gac2-dsh-aiops-skill-controller:
+  en: c32cc07fcea9a3c3
+  zh: 27584367db5b6d24
+/gac2-dsh-aiops-skill-controller/summary:
+  en: 438f8df7effcb0d1
+  zh: 4f6de9b13a7337c2
+/gac2-dsh-aiops-skill-controller/table-of-contents:
+  en: 4e53164159b5ce41
+  zh: adc27a3c31c4d4ee
+/gac2-dsh-aiops-skill-controller/use-this-package:
+  en: 2154e311207709c2
+  zh: ae3c608a872edcc8
+/gac2-dsh-aiops-skill-controller/model-experience:
+  en: c1b40ab639cefed6
+  zh: 963093745867076c
+/gac2-dsh-aiops-skill-controller/model-experience/kv-cache-effect:
+  en: ca3015e252db0114
+  zh: 13cbfb352d402d7d
+/gac2-dsh-aiops-skill-controller/known-limitations-and-deferred-work:
+  en: 84b730945ee2d841
+  zh: 88c0baba8c18a5d1
+/gac2-dsh-aiops-skill-controller/known-limitations-and-deferred-work/dev-note:
+  en: 8fdbe341c1da24cb
+  zh: 84a88a52f0672f00

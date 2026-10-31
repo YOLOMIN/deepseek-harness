@@ -97,6 +97,9 @@
       "path": "../../aiops/memory-controller"
     },
     {
+      "path": "../../aiops/skill-controller"
+    },
+    {
       "path": "../workspace-controller/tsconfig.client.json"
     },
     {

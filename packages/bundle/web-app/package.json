@@ -122,6 +122,7 @@
     "@gac2/dsh-aiops-agent-controller": "workspace:*",
     "@gac2/dsh-aiops-log-controller": "workspace:*",
     "@gac2/dsh-aiops-memory-controller": "workspace:*",
+    "@gac2/dsh-aiops-skill-controller": "workspace:*",
     "@deepseek-ai/dsh-client-ui-tool": "workspace:*",
     "@deepseek-ai/dsh-client-ui-trajectory": "workspace:*",
     "@deepseek-ai/dsh-client-ui-user-questions": "workspace:*",

@@ -16,6 +16,7 @@
     { "path": "../../client/ui-workspace" },
     { "path": "../agent-controller" },
     { "path": "../log-controller" },
-    { "path": "../memory-controller" }
+    { "path": "../memory-controller" },
+    { "path": "../skill-controller" }
   ]
 }
