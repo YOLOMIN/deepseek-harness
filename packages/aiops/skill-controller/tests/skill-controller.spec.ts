@@ -113,15 +113,19 @@ describe('AiopsSkillController.installSkill/uninstallSkill', () => {
   })
 })
 
-describe('AiopsSkillController registry config', () => {
+describe('AiopsSkillController settings', () => {
+  const override = { registryOrigin: 'http://override.test:9080', namespaceId: 'ops', autoDiscover: true, autoInvoke: true }
+
   it('falls back to plugin config and honors the persisted override', async () => {
     const { controller, skillsDir } = fixture()
-    expect(await controller.getRegistryConfig()).toEqual({ registryOrigin: 'http://registry.test', namespaceId: 'public' })
-    const saved = await controller.saveRegistryConfig({ registryOrigin: 'http://override.test:9080', namespaceId: 'ops' })
-    expect(saved).toEqual({ registryOrigin: 'http://override.test:9080', namespaceId: 'ops' })
+    expect(await controller.getSettings()).toEqual({
+      registryOrigin: 'http://registry.test', namespaceId: 'public', autoDiscover: true, autoInvoke: true,
+    })
+    const saved = await controller.saveSettings(override)
+    expect(saved).toEqual(override)
     const persisted = JSON.parse(await readFile(resolve(skillsDir, '..', 'aiops-skill-registry.json'), 'utf8')) as unknown
-    expect(persisted).toEqual({ registryOrigin: 'http://override.test:9080', namespaceId: 'ops' })
-    expect(await controller.getRegistryConfig()).toEqual(saved)
+    expect(persisted).toEqual(override)
+    expect(await controller.getSettings()).toEqual(override)
     let hit = ''
     stubFetch((url) => {
       hit = url
@@ -131,9 +135,60 @@ describe('AiopsSkillController registry config', () => {
     expect(hit.startsWith('http://override.test:9080/registry/ops/')).toBe(true)
   })
 
-  it('rejects invalid registry config at the wire boundary', async () => {
+  it('rejects invalid settings at the wire boundary', async () => {
     const { controller } = fixture()
-    await expect(controller.saveRegistryConfig({ registryOrigin: 'not-a-url', namespaceId: 'public' }))
+    await expect(controller.saveSettings({ ...override, registryOrigin: 'not-a-url' }))
       .rejects.toMatchObject({ code: 'aiops-skills/invalid' })
+  })
+
+  it('lists only local skills without contacting the registry when discovery is off', async () => {
+    const { controller, skillsDir } = fixture()
+    await mkdir(resolve(skillsDir, 'skill-local'), { recursive: true })
+    let contacted = false
+    stubFetch(() => {
+      contacted = true
+      return { json: { skills: [SUMMARY] } }
+    })
+    await controller.saveSettings({ ...override, autoDiscover: false })
+    const page = await controller.list({ page: 1, pageSize: 10 })
+    expect(contacted).toBe(false)
+    expect(page.total).toBe(1)
+    expect(page.rows[0]).toMatchObject({ name: 'skill-local', installed: true, invocable: true })
+  })
+
+  it('installs into quarantine while invocation is off and migrates on toggle', async () => {
+    const { controller, skillsDir } = fixture()
+    stubFetch((url) => {
+      if (url.endsWith('/index.json')) return { json: { skills: [{ name: 'skill-a', description: 'd', files: ['SKILL.md'] }] } }
+      if (url.includes('/skill-a/SKILL.md')) return { bytes: new TextEncoder().encode('# A\n') }
+      return { status: 404, json: {} }
+    })
+    const quarantine = resolve(skillsDir, '..', 'skills-quarantine')
+    await controller.saveSettings({ ...override, autoInvoke: false })
+    const installed = await controller.installSkill({ name: 'skill-a' })
+    expect(installed.path).toBe(resolve(quarantine, 'skill-a'))
+    const pageOff = await controller.list({ page: 1, pageSize: 10 })
+    expect(pageOff.rows[0]).toMatchObject({ name: 'skill-a', installed: true, invocable: false })
+    await controller.saveSettings({ ...override, autoInvoke: true })
+    const pageOn = await controller.list({ page: 1, pageSize: 10 })
+    expect(pageOn.rows[0]).toMatchObject({ name: 'skill-a', installed: true, invocable: true })
+    expect(await readFile(resolve(skillsDir, 'skill-a', 'SKILL.md'), 'utf8')).toBe('# A\n')
+  })
+
+  it('serves detail from the registry and reports local placement', async () => {
+    const { controller, skillsDir } = fixture()
+    stubFetch((url) => {
+      if (url.endsWith('/index.json')) return { json: { skills: [{ name: 'skill-a', description: 'd', files: ['SKILL.md', 'ref/a.md'] }] } }
+      if (url.includes('/skill-a/SKILL.md')) return { bytes: new TextEncoder().encode('# A\n') }
+      if (url.includes('/skill-a/ref/a.md')) return { bytes: new TextEncoder().encode('# ref\n') }
+      return { status: 404, json: {} }
+    })
+    await controller.installSkill({ name: 'skill-a' })
+    const detail = await controller.detail({ name: 'skill-a' })
+    expect(detail.row.installed).toBe(true)
+    expect(detail.row.invocable).toBe(true)
+    expect(detail.files).toEqual(['SKILL.md', 'ref/a.md'])
+    expect(detail.localPath).toBe(resolve(skillsDir, 'skill-a'))
+    await expect(controller.detail({ name: 'skill-x' })).rejects.toMatchObject({ code: 'aiops-skills/not-found' })
   })
 })

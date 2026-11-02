@@ -3,22 +3,25 @@
  * through its Agent-Skills well-known discovery surface
  * (`/registry/{namespace}/.well-known/agent-skills/index.json`), merges each
  * row with the local install state under the DSH user skills root, and
- * installs (`{skillName}.zip` download → extract) / uninstalls (remove the
- * directory) through the `aiopsSkills` Remote namespace. The
- * skill-filesystem provider watches the root, so install state takes effect
- * without a restart.
+ * installs (per-file download) / uninstalls (remove the directory) through
+ * the `aiopsSkills` Remote namespace. The skill-filesystem provider watches
+ * the root, so install state takes effect without a restart. The console-editable
+ * settings (registry connection, discovery and invocation switches) persist in
+ * `aiops-skill-registry.json` beside the skills root and win over the plugin Config.
  *
  * @module @gac2/dsh-aiops-skill-controller
  */
 
 import { homedir } from 'node:os'
 import { dirname, resolve, join } from 'node:path'
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { z as zod } from 'zod'
-import type { AiopsSkillPage, AiopsSkillQuery, AiopsSkillRegistryConfig, AiopsSkillRow } from './types.ts'
+import type {
+  AiopsSkillDetail, AiopsSkillPage, AiopsSkillQuery, AiopsSkillRow, AiopsSkillSettings,
+} from './types.ts'
 
 export type * from './types.ts'
 
@@ -50,9 +53,12 @@ const querySchema = zod.object({
 
 const nameSchema = zod.object({ name: zod.string().min(1) })
 
-const registryConfigSchema = zod.object({
+/** Persisted override: registry fields required, switches default on for files written before they existed. */
+const settingsSchema = zod.object({
   registryOrigin: zod.string().regex(/^https?:\/\/\S+$/u, '注册中心地址必须是 http(s) URL'),
   namespaceId: zod.string().min(1),
+  autoDiscover: zod.boolean().default(true),
+  autoInvoke: zod.boolean().default(true),
 })
 
 function invalid(field: string, message: string): RemoteError {
@@ -77,6 +83,12 @@ interface RegistryIndex {
   readonly skills?: readonly RegistrySkillEntry[]
 }
 
+/** Local placement of one installed skill: `live` = visible to agents, `quarantined` = downloaded but hidden. */
+interface Placement {
+  readonly live: ReadonlySet<string>
+  readonly quarantined: ReadonlySet<string>
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Skill registry + local install owner for the operations console. */
@@ -86,8 +98,8 @@ declare module '@deepseek-ai/cordis' {
 
 /**
  * Host owner of the `aiopsSkills` namespace. Registry reads hit the
- * well-known index on every query; install state is the local skills
- * directory contents.
+ * well-known index on every query unless discovery is switched off; install
+ * state is the union of the live skills root and the quarantine directory.
  */
 export class AiopsSkillController extends TypertRemoteService {
   static readonly inject: string[] = []
@@ -102,11 +114,11 @@ export class AiopsSkillController extends TypertRemoteService {
   }
 
   /**
-   * Registry connection currently in effect: the console-saved override file
-   * (beside the skills root) wins over the plugin Config from cordis.yml.
-   * @returns the merged registry connection fields.
+   * Settings currently in effect: the console-saved override file (beside the
+   * skills root) wins over the plugin Config from cordis.yml.
+   * @returns the merged settings with switches defaulted on.
    */
-  private async effectiveConnection(): Promise<AiopsSkillRegistryConfig> {
+  private async effectiveSettings(): Promise<AiopsSkillSettings> {
     let raw: string | undefined
     try {
       raw = await readFile(this.overridePath(), 'utf8')
@@ -115,24 +127,34 @@ export class AiopsSkillController extends TypertRemoteService {
     }
     if (raw !== undefined) {
       try {
-        const parsed = registryConfigSchema.safeParse(JSON.parse(raw))
+        const parsed = settingsSchema.safeParse(JSON.parse(raw))
         if (parsed.success) return parsed.data
       } catch {
         // JSON 损坏等价于无覆盖，避免阻塞清单查询
       }
     }
-    return { registryOrigin: this.config.registryOrigin, namespaceId: this.config.namespaceId }
+    return {
+      registryOrigin: this.config.registryOrigin,
+      namespaceId: this.config.namespaceId,
+      autoDiscover: true,
+      autoInvoke: true,
+    }
   }
 
-  /** Path of the console-saved registry override, beside the skills root. */
+  /** Path of the console-saved settings override, beside the skills root. */
   private overridePath(): string {
     return join(dirname(this.config.skillsDir), 'aiops-skill-registry.json')
   }
 
+  /** Quarantine root: installed skills hidden from agents while invocation is switched off. */
+  private quarantineDir(): string {
+    return join(dirname(this.config.skillsDir), 'skills-quarantine')
+  }
+
   /** Registry URL of the well-known agent-skills surface for the configured namespace. */
   private async registryBase(): Promise<string> {
-    const connection = await this.effectiveConnection()
-    return `${connection.registryOrigin}/registry/${encodeURIComponent(connection.namespaceId)}/.well-known/agent-skills`
+    const settings = await this.effectiveSettings()
+    return `${settings.registryOrigin}/registry/${encodeURIComponent(settings.namespaceId)}/.well-known/agent-skills`
   }
 
   /** GET the well-known index and validate its envelope. */
@@ -149,23 +171,25 @@ export class AiopsSkillController extends TypertRemoteService {
   }
 
   /** Map one index entry into the wire row (install state filled by the caller). */
-  private static rowOf(entry: RegistrySkillEntry, installed: boolean): AiopsSkillRow {
+  private static rowOf(entry: RegistrySkillEntry, placement: Placement): AiopsSkillRow {
     const updatedAt = typeof entry.updatedAt === 'string' ? Date.parse(entry.updatedAt) : entry.updatedAt
+    const name = entry.name ?? 'unknown'
     return {
-      name: entry.name ?? 'unknown',
+      name,
       version: entry.version ?? '-',
       description: entry.description ?? '',
       status: 'online',
-      installed,
+      installed: placement.live.has(name) || placement.quarantined.has(name),
+      invocable: placement.live.has(name),
       ...(updatedAt === undefined || Number.isNaN(updatedAt) ? {} : { time: updatedAt }),
     }
   }
 
-  /** Locally installed skill names = directories under the skills root. */
-  private async installedNames(): Promise<Set<string>> {
+  /** Directory names directly under one root; a missing root reads as empty. */
+  private static async dirNames(root: string): Promise<Set<string>> {
     let entries
     try {
-      entries = await readdir(this.config.skillsDir, { withFileTypes: true })
+      entries = await readdir(root, { withFileTypes: true })
     } catch (error: unknown) {
       if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return new Set()
       throw error
@@ -173,8 +197,30 @@ export class AiopsSkillController extends TypertRemoteService {
     return new Set(entries.filter(entry => entry.isDirectory()).map(entry => entry.name))
   }
 
+  /** Snapshot of which skills sit in the live root versus quarantine. */
+  private async placement(): Promise<Placement> {
+    return {
+      live: await AiopsSkillController.dirNames(this.config.skillsDir),
+      quarantined: await AiopsSkillController.dirNames(this.quarantineDir()),
+    }
+  }
+
+  /** Build a row for a locally installed skill when the registry is out of scope (discovery off). */
+  private async localRow(name: string, invocable: boolean): Promise<AiopsSkillRow> {
+    const dir = join(invocable ? this.config.skillsDir : this.quarantineDir(), name)
+    let description = ''
+    try {
+      const head = await readFile(join(dir, 'SKILL.md'), 'utf8')
+      description = /^description:\s*(.+)$/m.exec(head)?.[1]?.trim() ?? ''
+    } catch {
+      // SKILL.md 缺失时描述留空
+    }
+    return { name, version: '-', description, status: 'online', installed: true, invocable }
+  }
+
   /**
-   * Query registry skills merged with local install state.
+   * Query registry skills merged with local install state. With discovery
+   * switched off the registry is never contacted and only local skills list.
    * @param input - keyword filter plus paging.
    * @returns the filtered page with the installed count.
    */
@@ -183,24 +229,63 @@ export class AiopsSkillController extends TypertRemoteService {
     const parsed = querySchema.safeParse(input)
     if (!parsed.success) throw invalid('input', `查询参数无效：${parsed.error.issues[0]?.message ?? 'unknown'}`)
     const keyword = parsed.data.keyword?.toLowerCase()
-    const installed = await this.installedNames()
-    const rows = (await this.fetchIndex())
-      .map(entry => AiopsSkillController.rowOf(entry, installed.has(entry.name ?? '')))
+    const settings = await this.effectiveSettings()
+    const placement = await this.placement()
+    const rows = settings.autoDiscover
+      ? (await this.fetchIndex()).map(entry => AiopsSkillController.rowOf(entry, placement))
+      : await Promise.all([
+        ...[...placement.live].map(async name => this.localRow(name, true)),
+        ...[...placement.quarantined].map(async name => this.localRow(name, false)),
+      ])
+    const filtered = rows
       .filter(row => keyword === undefined || keyword === '' || `${row.name}\n${row.description}`.toLowerCase().includes(keyword))
       .sort((a, b) => (b.time ?? 0) - (a.time ?? 0))
     const start = (parsed.data.page - 1) * parsed.data.pageSize
     return {
-      total: rows.length,
+      total: filtered.length,
       page: parsed.data.page,
       pageSize: parsed.data.pageSize,
-      rows: rows.slice(start, start + parsed.data.pageSize),
-      installedCount: rows.filter(row => row.installed).length,
+      rows: filtered.slice(start, start + parsed.data.pageSize),
+      installedCount: filtered.filter(row => row.installed).length,
+    }
+  }
+
+  /**
+   * Read one skill's detail for the console dialog: registry metadata merged
+   * with local placement, falling back to local-only data when the registry
+   * does not know the skill.
+   * @param input - skill name.
+   * @returns the row beside the declared file list and local directory.
+   */
+  @Remote('detail')
+  async detail(input: { readonly name: string }): Promise<AiopsSkillDetail> {
+    const parsed = nameSchema.safeParse(input)
+    if (!parsed.success) throw invalid('name', 'skill 名称无效')
+    const name = parsed.data.name
+    const placement = await this.placement()
+    const localPath = placement.live.has(name)
+      ? join(this.config.skillsDir, name)
+      : placement.quarantined.has(name)
+        ? join(this.quarantineDir(), name)
+        : undefined
+    const entry = (await this.fetchIndex()).find(row => row.name === name)
+    if (entry === undefined) {
+      if (localPath === undefined) {
+        throw new RemoteError('aiops-skills/not-found', `技能库与本机都没有该 skill：${name}`, { name })
+      }
+      return { row: await this.localRow(name, placement.live.has(name)), files: ['SKILL.md'], localPath }
+    }
+    return {
+      row: AiopsSkillController.rowOf(entry, placement),
+      files: entry.files !== undefined && entry.files.length > 0 ? entry.files : ['SKILL.md'],
+      ...(localPath === undefined ? {} : { localPath }),
     }
   }
 
   /**
    * Install one registry skill: fetch its declared files from the well-known
-   * surface (`{name}/{filePath}`) and write them into the local skills root.
+   * surface (`{name}/{filePath}`) and write them into the live skills root —
+   * or into quarantine while automatic invocation is switched off.
    * The wire name cannot be `install`/`remove`: RemoteNamespaceService owns
    * those prototype members and rejects conflicting method names at mount.
    * @param input - skill name.
@@ -216,8 +301,9 @@ export class AiopsSkillController extends TypertRemoteService {
     if (entry === undefined) {
       throw new RemoteError('aiops-skills/not-found', `技能库中没有该 skill：${name}`, { name })
     }
+    const settings = await this.effectiveSettings()
     const files = entry.files !== undefined && entry.files.length > 0 ? entry.files : ['SKILL.md']
-    const target = join(this.config.skillsDir, name)
+    const target = join(settings.autoInvoke ? this.config.skillsDir : this.quarantineDir(), name)
     await rm(target, { recursive: true, force: true })
     await mkdir(target, { recursive: true })
     try {
@@ -248,7 +334,7 @@ export class AiopsSkillController extends TypertRemoteService {
   }
 
   /**
-   * Uninstall one skill from the local skills root; the registry entry stays.
+   * Uninstall one skill from the live root and quarantine; the registry entry stays.
    * @param input - skill name.
    * @returns confirmation of the removal.
    */
@@ -256,33 +342,48 @@ export class AiopsSkillController extends TypertRemoteService {
   async uninstallSkill(input: { readonly name: string }): Promise<{ readonly removed: true }> {
     const parsed = nameSchema.safeParse(input)
     if (!parsed.success) throw invalid('name', 'skill 名称无效')
-    const target = join(this.config.skillsDir, parsed.data.name)
-    await rm(target, { recursive: true, force: true })
+    await rm(join(this.config.skillsDir, parsed.data.name), { recursive: true, force: true })
+    await rm(join(this.quarantineDir(), parsed.data.name), { recursive: true, force: true })
     return { removed: true }
   }
 
   /**
-   * Read the registry connection the console shows and the queries use.
-   * @returns the effective registry origin and namespace.
+   * Read the settings the console shows and the queries use.
+   * @returns the effective registry connection plus discovery/invocation switches.
    */
-  @Remote('getRegistryConfig')
-  async getRegistryConfig(): Promise<AiopsSkillRegistryConfig> {
-    return this.effectiveConnection()
+  @Remote('getSettings')
+  async getSettings(): Promise<AiopsSkillSettings> {
+    return this.effectiveSettings()
   }
 
   /**
-   * Persist a registry connection override beside the skills root; the next
-   * query already reads it, so the change takes effect without a restart.
-   * @param input - full connection fields (both required).
-   * @returns the persisted connection.
+   * Persist the settings override beside the skills root; the next query reads
+   * it. Flipping the invocation switch migrates every installed skill between
+   * the live root and quarantine, so agents gain or lose them without a restart.
+   * @param input - full settings (every field required).
+   * @returns the persisted settings.
    */
-  @Remote('saveRegistryConfig')
-  async saveRegistryConfig(input: AiopsSkillRegistryConfig): Promise<AiopsSkillRegistryConfig> {
-    const parsed = registryConfigSchema.safeParse(input)
-    if (!parsed.success) throw invalid('input', `技能库配置无效：${parsed.error.issues[0]?.message ?? 'unknown'}`)
+  @Remote('saveSettings')
+  async saveSettings(input: AiopsSkillSettings): Promise<AiopsSkillSettings> {
+    const parsed = settingsSchema.safeParse(input)
+    if (!parsed.success) throw invalid('input', `技能配置无效：${parsed.error.issues[0]?.message ?? 'unknown'}`)
+    const previous = await this.effectiveSettings()
     await mkdir(dirname(this.overridePath()), { recursive: true })
     await writeFile(this.overridePath(), `${JSON.stringify(parsed.data, null, 2)}\n`, 'utf8')
+    if (previous.autoInvoke !== parsed.data.autoInvoke) {
+      await this.migrateAll(parsed.data.autoInvoke)
+    }
     return parsed.data
+  }
+
+  /** Move every installed skill into the live root (invocable) or quarantine (hidden). */
+  private async migrateAll(autoInvoke: boolean): Promise<void> {
+    const from = autoInvoke ? this.quarantineDir() : this.config.skillsDir
+    const to = autoInvoke ? this.config.skillsDir : this.quarantineDir()
+    for (const name of await AiopsSkillController.dirNames(from)) {
+      await mkdir(to, { recursive: true })
+      await rename(join(from, name), join(to, name))
+    }
   }
 }
 

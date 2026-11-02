@@ -15,7 +15,9 @@ import type { AiopsSkillsFace } from './skills-face.ts'
 import type { AiopsAgentRow } from '@gac2/dsh-aiops-agent-controller/types'
 import type { AiopsLogKind, AiopsLogLevel, AiopsLogPage, AiopsLogRow } from '@gac2/dsh-aiops-log-controller/types'
 import type { AiopsMemoryDetail, AiopsMemoryKind, AiopsMemoryPage, AiopsMemoryRow, AiopsRecallConfig } from '@gac2/dsh-aiops-memory-controller/types'
-import type { AiopsSkillPage, AiopsSkillRegistryConfig, AiopsSkillRow, AiopsSkillStatus } from '@gac2/dsh-aiops-skill-controller/types'
+import type {
+  AiopsSkillDetail, AiopsSkillPage, AiopsSkillRegistryConfig, AiopsSkillRow, AiopsSkillSettings, AiopsSkillStatus,
+} from '@gac2/dsh-aiops-skill-controller/types'
 import type { AiopsLocaleKey } from './locales.ts'
 import {
   IconDatabaseOutlineRegular,
@@ -485,7 +487,7 @@ function RagTab({ role }: { role: Role }) {
   )
 }
 
-/* ---------- skills 管理（Nacos 技能库清单 + 本地安装/卸载，真实分页） ---------- */
+/* ---------- skills 管理（Nacos 技能库清单 + 本地安装/卸载 + 发现/调用开关，真实分页） ---------- */
 const SKILL_STATUS_LABELS: Record<AiopsSkillStatus, string> = { editing: '编辑中', reviewing: '审核中', online: '已发布', offline: '已下线' }
 const SKILL_PAGE_SIZE = 8
 
@@ -497,7 +499,10 @@ function SkillsTab({ face }: { face: AiopsSkillsFace }) {
   const [paging, setPaging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [uninstalling, setUninstalling] = useState<AiopsSkillRow | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [busyName, setBusyName] = useState<string | null>(null)
+  const [detail, setDetail] = useState<AiopsSkillDetail | null>(null)
+  const [settings, setSettings] = useState<AiopsSkillSettings | undefined>(undefined)
+  const [switchSaving, setSwitchSaving] = useState(false)
   const [configOpen, setConfigOpen] = useState(false)
   const [configDraft, setConfigDraft] = useState<AiopsSkillRegistryConfig>({ registryOrigin: '', namespaceId: 'public' })
   const [configError, setConfigError] = useState<string | null>(null)
@@ -522,24 +527,34 @@ function SkillsTab({ face }: { face: AiopsSkillsFace }) {
     }
   }, [face, keyword])
 
-  useEffect(() => { void runQuery(1, 'page') }, []) // 仅挂载时首查（静默）；筛选变化由“查询”按钮触发
+  useEffect(() => {
+    void runQuery(1, 'page') // 仅挂载时首查（静默）；筛选变化由“查询”按钮触发
+    void face.getSettings().then(setSettings).catch(() => undefined)
+  }, [])
 
   const openConfig = async () => {
     setConfigError(null)
     setConfigOpen(true)
     try {
-      setConfigDraft(await face.getRegistryConfig())
+      const current = await face.getSettings()
+      setSettings(current)
+      setConfigDraft({ registryOrigin: current.registryOrigin, namespaceId: current.namespaceId })
     } catch (reason: unknown) {
       setConfigError(reason instanceof Error ? reason.message : String(reason))
     }
   }
 
   const saveConfig = async () => {
-    if (configSaving) return
+    if (configSaving || settings === undefined) return
     setConfigSaving(true)
     setConfigError(null)
     try {
-      await face.saveRegistryConfig({ registryOrigin: configDraft.registryOrigin.trim(), namespaceId: configDraft.namespaceId.trim() })
+      const saved = await face.saveSettings({
+        ...settings,
+        registryOrigin: configDraft.registryOrigin.trim(),
+        namespaceId: configDraft.namespaceId.trim(),
+      })
+      setSettings(saved)
       setConfigOpen(false)
       await runQuery(1)
     } catch (reason: unknown) {
@@ -549,22 +564,51 @@ function SkillsTab({ face }: { face: AiopsSkillsFace }) {
     }
   }
 
+  const flipSwitch = async (field: 'autoDiscover' | 'autoInvoke', value: boolean) => {
+    if (settings === undefined || switchSaving) return
+    const previous = settings
+    const next = { ...settings, [field]: value }
+    setSettings(next)
+    setSwitchSaving(true)
+    try {
+      await face.saveSettings(next)
+      await runQuery(1, 'page')
+    } catch (reason: unknown) {
+      setSettings(previous)
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setSwitchSaving(false)
+    }
+  }
+
   const install = async (row: AiopsSkillRow) => {
-    if (busy) return
-    setBusy(true)
+    if (busyName !== null) return
+    setBusyName(row.name)
     try {
       await face.installSkill(row.name)
       await runQuery(page, 'page')
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
-      setBusy(false)
+      setBusyName(null)
+    }
+  }
+
+  const openDetail = async (row: AiopsSkillRow) => {
+    if (busyName !== null) return
+    setBusyName(row.name)
+    try {
+      setDetail(await face.getSkillDetail(row.name))
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusyName(null)
     }
   }
 
   const confirmUninstall = async () => {
-    if (uninstalling === null || busy) return
-    setBusy(true)
+    if (uninstalling === null || busyName !== null) return
+    setBusyName(uninstalling.name)
     try {
       await face.uninstallSkill(uninstalling.name)
       setUninstalling(null)
@@ -572,7 +616,7 @@ function SkillsTab({ face }: { face: AiopsSkillsFace }) {
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
-      setBusy(false)
+      setBusyName(null)
     }
   }
 
@@ -597,24 +641,33 @@ function SkillsTab({ face }: { face: AiopsSkillsFace }) {
         {error !== null && <div style={{ fontSize: 12.5, color: V.error, marginBottom: 10 }}>{error}</div>}
         {data === undefined && error === null && <div style={{ fontSize: 12.5, color: V.text3 }}>加载中…</div>}
         {data !== undefined && data.total === 0 && (
-          <div style={{ fontSize: 12.5, color: V.text3 }}>技能库暂无匹配 skill，调整关键字后重试。</div>
+          <div style={{ fontSize: 12.5, color: V.text3 }}>
+            {settings?.autoDiscover === false ? '自动发现已停用，仅显示本机已安装 skill；当前没有已安装 skill。' : '技能库暂无匹配 skill，调整关键字后重试。'}
+          </div>
         )}
         {data !== undefined && data.total > 0 && (
           <div style={grid}>
             {data.rows.map(row => (
               <ItemCard
                 key={row.name}
-                icon={row.name.replace(/^skill-/, '').slice(0, 1)} iconColor={row.installed ? '#5b6ee1' : '#8a94a6'}
+                icon={row.name.replace(/^skill-/, '').slice(0, 1)} iconColor={row.invocable ? '#5b6ee1' : '#8a94a6'}
                 name={row.name} meta={`${row.name} · ${row.version}`}
                 desc={row.description}
                 tags={[
-                  { color: row.installed ? V.success : V.text3, text: row.installed ? '已加载' : '未加载' },
+                  row.invocable
+                    ? { color: V.success, text: '已加载' }
+                    : row.installed
+                      ? { color: V.warn, text: '已安装·调用停用' }
+                      : { color: V.text3, text: '未安装' },
                   { color: V.text3, text: SKILL_STATUS_LABELS[row.status] },
                 ]}
-                highlight={row.installed}
-                actions={row.installed
-                  ? <Btn onClick={() => { setUninstalling(row) }}>卸载</Btn>
-                  : <Btn primary disabled={busy} onClick={() => { void install(row) }}>安装</Btn>}
+                highlight={row.invocable}
+                actions={<span style={{ display: 'flex', gap: 6 }}>
+                  <Btn disabled={busyName === row.name} onClick={() => { void openDetail(row) }}>详情</Btn>
+                  {row.installed
+                    ? <Btn danger disabled={busyName === row.name} onClick={() => { setUninstalling(row) }}>卸载</Btn>
+                    : <Btn primary disabled={busyName === row.name} onClick={() => { void install(row) }}>{busyName === row.name ? '安装中…' : '安装'}</Btn>}
+                </span>}
               />
             ))}
           </div>
@@ -628,6 +681,27 @@ function SkillsTab({ face }: { face: AiopsSkillsFace }) {
           onPage={(next) => { void runQuery(next, 'page') }}
         />
       </div>
+
+      <FuncCard name="skill 发现" kind="runtime">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <Note>监听技能库（nacos）注册信息，自动扫描发现可用 skill 并按需读取 skill 定义；清单支持按名称与描述查询。关闭后清单仅显示本机已安装 skill，不再访问技能库。</Note>
+          <Switch
+            on={settings?.autoDiscover ?? true}
+            onChange={(v) => { void flipSwitch('autoDiscover', v) }}
+            label={settings?.autoDiscover === false ? '已停用' : '自动发现（监听技能库）'}
+          />
+        </div>
+      </FuncCard>
+      <FuncCard name="skill 调用" kind="runtime">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <Note>已安装 skill 对智能体可见并按任务意图匹配调用，解析定义文件按步骤编排执行。关闭后已安装 skill 整体转入隔离区，智能体不再命中；开启即恢复。</Note>
+          <Switch
+            on={settings?.autoInvoke ?? true}
+            onChange={(v) => { void flipSwitch('autoInvoke', v) }}
+            label={settings?.autoInvoke === false ? '已停用' : '按任务意图自动调用 skill'}
+          />
+        </div>
+      </FuncCard>
 
       {configOpen && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
@@ -660,6 +734,25 @@ function SkillsTab({ face }: { face: AiopsSkillsFace }) {
         </div>
       )}
 
+      {detail !== null && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
+          <div style={{ ...card, width: 460, padding: '16px 18px', display: 'grid', gap: 10, boxShadow: '0 12px 40px rgba(0,0,0,.28)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: V.text }}>skill 详情</div>
+            <div style={{ fontSize: 12.5, color: V.text2, lineHeight: 1.9 }}>
+              <div>名称：<span style={{ fontFamily: V.mono }}>{detail.row.name}</span></div>
+              <div>版本：{detail.row.version} · 状态：{SKILL_STATUS_LABELS[detail.row.status]}</div>
+              <div>安装：{detail.row.installed ? (detail.row.invocable ? '已加载（对智能体可见）' : '已安装·调用停用（隔离区）') : '未安装'}</div>
+              {detail.localPath !== undefined && <div>本地目录：<span style={{ fontFamily: V.mono }}>{detail.localPath}</span></div>}
+              <div>声明文件：<span style={{ fontFamily: V.mono }}>{detail.files.join('、')}</span></div>
+              <div style={{ marginTop: 6, borderTop: `1px solid ${V.border}`, paddingTop: 8 }}>{detail.row.description}</div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Btn onClick={() => { setDetail(null) }}>关闭</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
       {uninstalling !== null && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
           <div style={{ ...card, width: 380, padding: '16px 18px', display: 'grid', gap: 10, boxShadow: '0 12px 40px rgba(0,0,0,.28)' }}>
@@ -669,7 +762,7 @@ function SkillsTab({ face }: { face: AiopsSkillsFace }) {
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <Btn onClick={() => { setUninstalling(null) }}>取消</Btn>
-              <Btn danger onClick={() => { void confirmUninstall() }}>{busy ? '卸载中…' : '确认卸载'}</Btn>
+              <Btn danger onClick={() => { void confirmUninstall() }}>{busyName === uninstalling.name ? '卸载中…' : '确认卸载'}</Btn>
             </div>
           </div>
         </div>

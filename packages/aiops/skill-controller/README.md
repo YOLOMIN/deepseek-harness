@@ -23,7 +23,7 @@ Mount skill management for the GAC2 operations console. The controller lists ski
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount `@gac2/dsh-aiops-skill-controller` in the Web composition (see `aiops.patch.yml`). Configuration fields: `registryOrigin` (required, e.g. `http://192.168.10.95:9080`), `namespaceId` (default `public`), `skillsDir` (default `~/.dsh/skills`), `requestTimeoutMs` (default 15000). The console queries through `ctx.remote.aiopsSkills.list({ keyword, page, pageSize })` and installs/uninstalls by skill name. The "registry connection" dialog reads/writes the connection through `getRegistryConfig`/`saveRegistryConfig`; overrides persist in `aiops-skill-registry.json` beside the skills root, take precedence over the plugin config, and apply on save without a restart.
+Mount `@gac2/dsh-aiops-skill-controller` in the Web composition (see `aiops.patch.yml`). Configuration fields: `registryOrigin` (required, e.g. `http://192.168.10.95:9080`), `namespaceId` (default `public`), `skillsDir` (default `~/.dsh/skills`), `requestTimeoutMs` (default 15000). The console queries through `ctx.remote.aiopsSkills.list({ keyword, page, pageSize })`, reads one skill through `detail`, and installs/uninstalls by skill name. The registry dialog and the discovery/invocation switches read/write through `getSettings`/`saveSettings`; overrides persist in `aiops-skill-registry.json` beside the skills root, take precedence over the plugin config, and apply on save. With discovery off the listing shows only locally installed skills; with invocation off every installed skill moves into the sibling `skills-quarantine` directory, invisible to agents, and moves back when re-enabled.
 
 ## Model Experience
 

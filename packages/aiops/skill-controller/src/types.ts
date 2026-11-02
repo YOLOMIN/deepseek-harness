@@ -17,10 +17,21 @@ export interface AiopsSkillRow {
   readonly description: string
   /** Registry lifecycle status of that version. */
   readonly status: AiopsSkillStatus
-  /** Whether the skill is installed into the local DSH skills root. */
+  /** Whether the skill is downloaded onto this machine (live root or quarantine). */
   readonly installed: boolean
+  /** Whether the installed skill is visible to agents (live skills root, not quarantined). */
+  readonly invocable: boolean
   /** Registry update time in epoch milliseconds, when known. */
   readonly time?: number | undefined
+}
+
+/** Full skill detail for the in-place dialog: registry metadata plus local placement. */
+export interface AiopsSkillDetail {
+  readonly row: AiopsSkillRow
+  /** Declared text files of the skill (e.g. `["SKILL.md"]`). */
+  readonly files: readonly string[]
+  /** Local directory holding the skill, when installed. */
+  readonly localPath?: string | undefined
 }
 
 /** Paged registry query accepted by the aiopsSkills namespace. */
@@ -49,6 +60,14 @@ export interface AiopsSkillRegistryConfig {
   readonly registryOrigin: string
   /** Registry namespace; the fork's skills live in `public`. */
   readonly namespaceId: string
+}
+
+/** Console-editable skill subsystem settings: registry connection plus discovery/invocation switches. */
+export interface AiopsSkillSettings extends AiopsSkillRegistryConfig {
+  /** 自动发现：关闭后清单不再访问技能库，只列本机已安装技能。 */
+  readonly autoDiscover: boolean
+  /** 自动调用：关闭后安装的技能落入隔离目录，对智能体不可见。 */
+  readonly autoInvoke: boolean
 }
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
