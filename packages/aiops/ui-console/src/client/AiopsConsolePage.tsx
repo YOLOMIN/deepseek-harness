@@ -15,7 +15,7 @@ import type { AiopsSkillsFace } from './skills-face.ts'
 import type { AiopsAgentRow } from '@gac2/dsh-aiops-agent-controller/types'
 import type { AiopsLogKind, AiopsLogLevel, AiopsLogPage, AiopsLogRow } from '@gac2/dsh-aiops-log-controller/types'
 import type { AiopsMemoryDetail, AiopsMemoryKind, AiopsMemoryPage, AiopsMemoryRow, AiopsRecallConfig } from '@gac2/dsh-aiops-memory-controller/types'
-import type { AiopsSkillPage, AiopsSkillRow, AiopsSkillStatus } from '@gac2/dsh-aiops-skill-controller/types'
+import type { AiopsSkillPage, AiopsSkillRegistryConfig, AiopsSkillRow, AiopsSkillStatus } from '@gac2/dsh-aiops-skill-controller/types'
 import type { AiopsLocaleKey } from './locales.ts'
 import {
   IconDatabaseOutlineRegular,
@@ -163,7 +163,7 @@ function ItemCard(props: {
   meta?: string
   desc: string
   tags?: { color: string; text: string }[]
-  source: string
+  source?: string
   actions: unknown
   highlight?: boolean
 }) {
@@ -184,8 +184,13 @@ function ItemCard(props: {
       </div>
       <div style={{ fontSize: 12.5, color: V.text2, lineHeight: 1.7, flex: 1 }} className={css.clamp3}>{props.desc}</div>
       {props.tags && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{props.tags.map((tg, i) => <Tag key={i} color={tg.color}>{tg.text}</Tag>)}</div>}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, borderTop: `1px solid ${V.border}`, paddingTop: 8 }}>
-        <span style={{ fontSize: 11.5, color: V.text3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{props.source}</span>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8, borderTop: `1px solid ${V.border}`, paddingTop: 8,
+        ...(props.source === undefined ? { justifyContent: 'flex-end' } : {}),
+      }}>
+        {props.source !== undefined && (
+          <span style={{ fontSize: 11.5, color: V.text3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{props.source}</span>
+        )}
         {props.actions as never}
       </div>
     </div>
@@ -493,6 +498,10 @@ function SkillsTab({ face }: { face: AiopsSkillsFace }) {
   const [error, setError] = useState<string | null>(null)
   const [uninstalling, setUninstalling] = useState<AiopsSkillRow | null>(null)
   const [busy, setBusy] = useState(false)
+  const [configOpen, setConfigOpen] = useState(false)
+  const [configDraft, setConfigDraft] = useState<AiopsSkillRegistryConfig>({ registryOrigin: '', namespaceId: 'public' })
+  const [configError, setConfigError] = useState<string | null>(null)
+  const [configSaving, setConfigSaving] = useState(false)
 
   const runQuery = useCallback(async (targetPage: number, intent: 'query' | 'page' = 'query') => {
     const setBusyFlag = intent === 'page' ? setPaging : setQuerying
@@ -514,6 +523,31 @@ function SkillsTab({ face }: { face: AiopsSkillsFace }) {
   }, [face, keyword])
 
   useEffect(() => { void runQuery(1, 'page') }, []) // 仅挂载时首查（静默）；筛选变化由“查询”按钮触发
+
+  const openConfig = async () => {
+    setConfigError(null)
+    setConfigOpen(true)
+    try {
+      setConfigDraft(await face.getRegistryConfig())
+    } catch (reason: unknown) {
+      setConfigError(reason instanceof Error ? reason.message : String(reason))
+    }
+  }
+
+  const saveConfig = async () => {
+    if (configSaving) return
+    setConfigSaving(true)
+    setConfigError(null)
+    try {
+      await face.saveRegistryConfig({ registryOrigin: configDraft.registryOrigin.trim(), namespaceId: configDraft.namespaceId.trim() })
+      setConfigOpen(false)
+      await runQuery(1)
+    } catch (reason: unknown) {
+      setConfigError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setConfigSaving(false)
+    }
+  }
 
   const install = async (row: AiopsSkillRow) => {
     if (busy) return
@@ -556,8 +590,8 @@ function SkillsTab({ face }: { face: AiopsSkillsFace }) {
             style={{ padding: '5px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, minWidth: 200, background: 'transparent', color: V.text }}
           />
           <Btn primary disabled={querying} onClick={() => { void runQuery(1) }}>{querying ? '查询中…' : '查询'}</Btn>
-          <span style={{ marginLeft: 'auto', fontSize: 12, color: V.text3 }}>
-            技能库：nacos 注册中心 · 已安装 {data?.installedCount ?? '…'} / 共 {data?.total ?? '…'} 个 · 安装/卸载即时生效，无需重启
+          <span style={{ marginLeft: 'auto' }}>
+            <Btn onClick={() => { void openConfig() }}>技能库配置</Btn>
           </span>
         </div>
         {error !== null && <div style={{ fontSize: 12.5, color: V.error, marginBottom: 10 }}>{error}</div>}
@@ -577,7 +611,6 @@ function SkillsTab({ face }: { face: AiopsSkillsFace }) {
                   { color: row.installed ? V.success : V.text3, text: row.installed ? '已加载' : '未加载' },
                   { color: V.text3, text: SKILL_STATUS_LABELS[row.status] },
                 ]}
-                source="来自 技能库 nacos"
                 highlight={row.installed}
                 actions={row.installed
                   ? <Btn onClick={() => { setUninstalling(row) }}>卸载</Btn>
@@ -595,6 +628,37 @@ function SkillsTab({ face }: { face: AiopsSkillsFace }) {
           onPage={(next) => { void runQuery(next, 'page') }}
         />
       </div>
+
+      {configOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
+          <div style={{ ...card, width: 420, padding: '16px 18px', display: 'grid', gap: 10, boxShadow: '0 12px 40px rgba(0,0,0,.28)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: V.text }}>技能库配置</div>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>注册中心地址</span>
+              <input
+                value={configDraft.registryOrigin}
+                onChange={(e) => { setConfigDraft({ ...configDraft, registryOrigin: e.target.value }) }}
+                placeholder="http://192.168.10.95:9080"
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text, fontFamily: V.mono }}
+              />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>命名空间</span>
+              <input
+                value={configDraft.namespaceId}
+                onChange={(e) => { setConfigDraft({ ...configDraft, namespaceId: e.target.value }) }}
+                placeholder="public"
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text, fontFamily: V.mono }}
+              />
+            </label>
+            {configError !== null && <div style={{ fontSize: 12.5, color: V.error }}>{configError}</div>}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Btn onClick={() => { setConfigOpen(false) }}>取消</Btn>
+              <Btn primary disabled={configSaving} onClick={() => { void saveConfig() }}>{configSaving ? '保存中…' : '保存'}</Btn>
+            </div>
+          </div>
+        </div>
+      )}
 
       {uninstalling !== null && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>

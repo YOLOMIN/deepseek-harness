@@ -12,13 +12,13 @@
  */
 
 import { homedir } from 'node:os'
-import { resolve, join } from 'node:path'
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
+import { dirname, resolve, join } from 'node:path'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { z as zod } from 'zod'
-import type { AiopsSkillPage, AiopsSkillQuery, AiopsSkillRow } from './types.ts'
+import type { AiopsSkillPage, AiopsSkillQuery, AiopsSkillRegistryConfig, AiopsSkillRow } from './types.ts'
 
 export type * from './types.ts'
 
@@ -49,6 +49,11 @@ const querySchema = zod.object({
 })
 
 const nameSchema = zod.object({ name: zod.string().min(1) })
+
+const registryConfigSchema = zod.object({
+  registryOrigin: zod.string().regex(/^https?:\/\/\S+$/u, '注册中心地址必须是 http(s) URL'),
+  namespaceId: zod.string().min(1),
+})
 
 function invalid(field: string, message: string): RemoteError {
   return new RemoteError('aiops-skills/invalid', message, { field })
@@ -96,16 +101,45 @@ export class AiopsSkillController extends TypertRemoteService {
     this.config = resolved
   }
 
+  /**
+   * Registry connection currently in effect: the console-saved override file
+   * (beside the skills root) wins over the plugin Config from cordis.yml.
+   * @returns the merged registry connection fields.
+   */
+  private async effectiveConnection(): Promise<AiopsSkillRegistryConfig> {
+    let raw: string | undefined
+    try {
+      raw = await readFile(this.overridePath(), 'utf8')
+    } catch {
+      // 覆盖文件缺失或不可读时回退插件配置
+    }
+    if (raw !== undefined) {
+      try {
+        const parsed = registryConfigSchema.safeParse(JSON.parse(raw))
+        if (parsed.success) return parsed.data
+      } catch {
+        // JSON 损坏等价于无覆盖，避免阻塞清单查询
+      }
+    }
+    return { registryOrigin: this.config.registryOrigin, namespaceId: this.config.namespaceId }
+  }
+
+  /** Path of the console-saved registry override, beside the skills root. */
+  private overridePath(): string {
+    return join(dirname(this.config.skillsDir), 'aiops-skill-registry.json')
+  }
+
   /** Registry URL of the well-known agent-skills surface for the configured namespace. */
-  private registryBase(): string {
-    return `${this.config.registryOrigin}/registry/${encodeURIComponent(this.config.namespaceId)}/.well-known/agent-skills`
+  private async registryBase(): Promise<string> {
+    const connection = await this.effectiveConnection()
+    return `${connection.registryOrigin}/registry/${encodeURIComponent(connection.namespaceId)}/.well-known/agent-skills`
   }
 
   /** GET the well-known index and validate its envelope. */
   private async fetchIndex(): Promise<readonly RegistrySkillEntry[]> {
     let response: Response
     try {
-      response = await fetch(`${this.registryBase()}/index.json`, { signal: AbortSignal.timeout(this.config.requestTimeoutMs) })
+      response = await fetch(`${await this.registryBase()}/index.json`, { signal: AbortSignal.timeout(this.config.requestTimeoutMs) })
     } catch (error: unknown) {
       throw upstream('unreachable', `技能库不可达：${error instanceof Error ? error.message : String(error)}`)
     }
@@ -203,7 +237,7 @@ export class AiopsSkillController extends TypertRemoteService {
   /** GET one skill file from the well-known surface as text. */
   private async fetchFile(name: string, filePath: string): Promise<string> {
     let response: Response
-    const url = `${this.registryBase()}/${encodeURIComponent(name)}/${filePath.split('/').map(encodeURIComponent).join('/')}`
+    const url = `${await this.registryBase()}/${encodeURIComponent(name)}/${filePath.split('/').map(encodeURIComponent).join('/')}`
     try {
       response = await fetch(url, { signal: AbortSignal.timeout(this.config.requestTimeoutMs) })
     } catch (error: unknown) {
@@ -225,6 +259,30 @@ export class AiopsSkillController extends TypertRemoteService {
     const target = join(this.config.skillsDir, parsed.data.name)
     await rm(target, { recursive: true, force: true })
     return { removed: true }
+  }
+
+  /**
+   * Read the registry connection the console shows and the queries use.
+   * @returns the effective registry origin and namespace.
+   */
+  @Remote('getRegistryConfig')
+  async getRegistryConfig(): Promise<AiopsSkillRegistryConfig> {
+    return this.effectiveConnection()
+  }
+
+  /**
+   * Persist a registry connection override beside the skills root; the next
+   * query already reads it, so the change takes effect without a restart.
+   * @param input - full connection fields (both required).
+   * @returns the persisted connection.
+   */
+  @Remote('saveRegistryConfig')
+  async saveRegistryConfig(input: AiopsSkillRegistryConfig): Promise<AiopsSkillRegistryConfig> {
+    const parsed = registryConfigSchema.safeParse(input)
+    if (!parsed.success) throw invalid('input', `技能库配置无效：${parsed.error.issues[0]?.message ?? 'unknown'}`)
+    await mkdir(dirname(this.overridePath()), { recursive: true })
+    await writeFile(this.overridePath(), `${JSON.stringify(parsed.data, null, 2)}\n`, 'utf8')
+    return parsed.data
   }
 }
 

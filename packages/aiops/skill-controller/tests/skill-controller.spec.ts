@@ -1,6 +1,6 @@
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -9,7 +9,7 @@ import type { Config } from '../src/index.ts'
 
 function fixture() {
   const ctx = new Context()
-  const skillsDir = resolve(tmpdir(), `aiops-skills-test-${randomUUID()}`)
+  const skillsDir = resolve(tmpdir(), `aiops-skills-test-${randomUUID()}`, 'skills')
   const config: Config = {
     registryOrigin: 'http://registry.test',
     namespaceId: 'public',
@@ -110,5 +110,30 @@ describe('AiopsSkillController.installSkill/uninstallSkill', () => {
     await mkdir(resolve(skillsDir, 'skill-a'), { recursive: true })
     await controller.uninstallSkill({ name: 'skill-a' })
     await expect(controller.uninstallSkill({ name: '' })).rejects.toMatchObject({ code: 'aiops-skills/invalid' })
+  })
+})
+
+describe('AiopsSkillController registry config', () => {
+  it('falls back to plugin config and honors the persisted override', async () => {
+    const { controller, skillsDir } = fixture()
+    expect(await controller.getRegistryConfig()).toEqual({ registryOrigin: 'http://registry.test', namespaceId: 'public' })
+    const saved = await controller.saveRegistryConfig({ registryOrigin: 'http://override.test:9080', namespaceId: 'ops' })
+    expect(saved).toEqual({ registryOrigin: 'http://override.test:9080', namespaceId: 'ops' })
+    const persisted = JSON.parse(await readFile(resolve(skillsDir, '..', 'aiops-skill-registry.json'), 'utf8')) as unknown
+    expect(persisted).toEqual({ registryOrigin: 'http://override.test:9080', namespaceId: 'ops' })
+    expect(await controller.getRegistryConfig()).toEqual(saved)
+    let hit = ''
+    stubFetch((url) => {
+      hit = url
+      return { json: { skills: [] } }
+    })
+    await controller.list({ page: 1, pageSize: 10 })
+    expect(hit.startsWith('http://override.test:9080/registry/ops/')).toBe(true)
+  })
+
+  it('rejects invalid registry config at the wire boundary', async () => {
+    const { controller } = fixture()
+    await expect(controller.saveRegistryConfig({ registryOrigin: 'not-a-url', namespaceId: 'public' }))
+      .rejects.toMatchObject({ code: 'aiops-skills/invalid' })
   })
 })

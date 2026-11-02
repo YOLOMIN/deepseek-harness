@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Mount skill management for the GAC2 operations console. The controller lists skills from the deployment's Nacos registry (`/nacos/v3/console/ai/skills/list`), merges each row with the local install state under the DSH user skills root, and installs (per-file download) or uninstalls (remove the directory) through the `aiopsSkills` Remote namespace. The skill-filesystem provider watches the root, so installs take effect without a restart.
+Mount skill management for the GAC2 operations console. The controller lists skills from the deployment's Nacos registry well-known discovery surface (`/registry/{namespace}/.well-known/agent-skills/index.json`), merges each row with the local install state under the DSH user skills root, and installs (per-file download) or uninstalls (remove the directory) through the `aiopsSkills` Remote namespace. The skill-filesystem provider watches the root, so installs take effect without a restart.
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ Mount skill management for the GAC2 operations console. The controller lists ski
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount `@gac2/dsh-aiops-skill-controller` in the Web composition (see `aiops.patch.yml`). Configuration fields: `registryOrigin` (required, e.g. `http://192.168.10.95:8848`), `namespaceId` (default `public`), `skillsDir` (default `~/.dsh/skills`), `requestTimeoutMs` (default 15000). The console queries through `ctx.remote.aiopsSkills.list({ keyword, page, pageSize })` and installs/uninstalls by skill name.
+Mount `@gac2/dsh-aiops-skill-controller` in the Web composition (see `aiops.patch.yml`). Configuration fields: `registryOrigin` (required, e.g. `http://192.168.10.95:9080`), `namespaceId` (default `public`), `skillsDir` (default `~/.dsh/skills`), `requestTimeoutMs` (default 15000). The console queries through `ctx.remote.aiopsSkills.list({ keyword, page, pageSize })` and installs/uninstalls by skill name. The "registry connection" dialog reads/writes the connection through `getRegistryConfig`/`saveRegistryConfig`; overrides persist in `aiops-skill-registry.json` beside the skills root, take precedence over the plugin config, and apply on save without a restart.
 
 ## Model Experience
 

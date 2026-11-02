@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-为广汽二期智能运维控制台挂载 skill 管理能力。控制器从部署的 Nacos 技能库（`/nacos/v3/console/ai/skills/list`）拉取清单，与 DSH 用户技能根目录的本地安装状态合并，并经 `aiopsSkills` Remote 命名空间提供安装（逐文件下载）与卸载（移除目录）。skill-filesystem 提供者监听技能根目录，安装无需重启即时生效。
+为广汽二期智能运维控制台挂载 skill 管理能力。控制器从部署的 Nacos 技能库 well-known 发现面（`/registry/{namespace}/.well-known/agent-skills/index.json`）拉取清单，与 DSH 用户技能根目录的本地安装状态合并，并经 `aiopsSkills` Remote 命名空间提供安装（逐文件下载）与卸载（移除目录）。skill-filesystem 提供者监听技能根目录，安装无需重启即时生效。
 
 ## 目录
 
@@ -23,7 +23,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-在 Web 组合中挂载 `@gac2/dsh-aiops-skill-controller`（见 `aiops.patch.yml`）。配置字段：`registryOrigin`（必填，如 `http://192.168.10.95:8848`）、`namespaceId`（默认 `public`）、`skillsDir`（默认 `~/.dsh/skills`）、`requestTimeoutMs`（默认 15000）。控制台经 `ctx.remote.aiopsSkills.list({ keyword, page, pageSize })` 查询，按名称安装/卸载。
+在 Web 组合中挂载 `@gac2/dsh-aiops-skill-controller`（见 `aiops.patch.yml`）。配置字段：`registryOrigin`（必填，如 `http://192.168.10.95:9080`）、`namespaceId`（默认 `public`）、`skillsDir`（默认 `~/.dsh/skills`）、`requestTimeoutMs`（默认 15000）。控制台经 `ctx.remote.aiopsSkills.list({ keyword, page, pageSize })` 查询，按名称安装/卸载。「技能库配置」弹窗经 `getRegistryConfig`/`saveRegistryConfig` 读写对接设置，覆盖值持久化在技能根目录旁的 `aiops-skill-registry.json`，优先于插件配置且保存即生效，无需重启。
 
 ## 模型体验
 

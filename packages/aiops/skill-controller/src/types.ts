@@ -43,6 +43,14 @@ export interface AiopsSkillPage {
   readonly installedCount: number
 }
 
+/** Registry connection settings editable from the console, persisted as an override file. */
+export interface AiopsSkillRegistryConfig {
+  /** Skill registry origin (the AI-registry adaptor port), e.g. `http://192.168.10.95:9080`. */
+  readonly registryOrigin: string
+  /** Registry namespace; the fork's skills live in `public`. */
+  readonly namespaceId: string
+}
+
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap {
     /** Malformed input; the field names the first offending member. */

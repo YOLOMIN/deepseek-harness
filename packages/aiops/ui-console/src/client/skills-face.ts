@@ -6,7 +6,7 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // Type-only: pulls the ctx.remote merge into this program.
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@gac2/dsh-aiops-skill-controller/remote'
-import type { AiopsSkillPage, AiopsSkillQuery } from '@gac2/dsh-aiops-skill-controller/types'
+import type { AiopsSkillPage, AiopsSkillQuery, AiopsSkillRegistryConfig } from '@gac2/dsh-aiops-skill-controller/types'
 
 /** Skills tab data and action surface injected by the plugin apply closure. */
 export interface AiopsSkillsFace {
@@ -16,6 +16,10 @@ export interface AiopsSkillsFace {
   installSkill: (name: string) => Promise<void>
   /** Uninstall one skill from the local skills root. */
   uninstallSkill: (name: string) => Promise<void>
+  /** Read the effective registry connection (console override or plugin config). */
+  getRegistryConfig: () => Promise<AiopsSkillRegistryConfig>
+  /** Persist a registry connection override; later queries use it immediately. */
+  saveRegistryConfig: (input: AiopsSkillRegistryConfig) => Promise<AiopsSkillRegistryConfig>
 }
 
 function unwrap<T>(result: { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: { message: string } }): T {
@@ -33,5 +37,7 @@ export function createAiopsSkillsFace(ctx: ClientContext): AiopsSkillsFace {
     listSkills: async input => unwrap(await ctx.remote.aiopsSkills.list(input)),
     installSkill: async (name) => { unwrap(await ctx.remote.aiopsSkills.installSkill({ name })) },
     uninstallSkill: async (name) => { unwrap(await ctx.remote.aiopsSkills.uninstallSkill({ name })) },
+    getRegistryConfig: async () => unwrap(await ctx.remote.aiopsSkills.getRegistryConfig()),
+    saveRegistryConfig: async input => unwrap(await ctx.remote.aiopsSkills.saveRegistryConfig(input)),
   }
 }
