@@ -12,12 +12,16 @@ import type { AiopsAgentsFace } from './agents-face.ts'
 import type { AiopsLogsFace } from './logs-face.ts'
 import type { AiopsMemoryFace } from './memory-face.ts'
 import type { AiopsSkillsFace } from './skills-face.ts'
+import type { AiopsMcpFace } from './mcp-face.ts'
 import type { AiopsAgentRow } from '@gac2/dsh-aiops-agent-controller/types'
 import type { AiopsLogKind, AiopsLogLevel, AiopsLogPage, AiopsLogRow } from '@gac2/dsh-aiops-log-controller/types'
 import type { AiopsMemoryDetail, AiopsMemoryKind, AiopsMemoryPage, AiopsMemoryRow, AiopsRecallConfig } from '@gac2/dsh-aiops-memory-controller/types'
 import type {
   AiopsSkillDetail, AiopsSkillPage, AiopsSkillRegistryConfig, AiopsSkillRow, AiopsSkillSettings, AiopsSkillStatus,
 } from '@gac2/dsh-aiops-skill-controller/types'
+import type {
+  AiopsMcpServerDetail, AiopsMcpServerPage, AiopsMcpServerRow, AiopsMcpSettings,
+} from '@gac2/dsh-aiops-mcp-controller/types'
 import type { AiopsLocaleKey } from './locales.ts'
 import {
   IconDatabaseOutlineRegular,
@@ -1229,75 +1233,273 @@ function MemoryTab({ face }: { face: AiopsMemoryFace }) {
   )
 }
 
-/* ---------- MCP 接口管理（MCP Server 卡片网格，分页；按账户权限过滤） ---------- */
-function McpTab({ role }: { role: Role }) {
-  const [invoke, setInvoke] = useState(true)
-  const servers = [
-    { scope: 'shared' as Scope, card: (
-      <ItemCard
-        icon="监" iconColor="#5b6ee1" name="监控查询服务" meta="mcp-monitor · 工具 6"
-        desc="集群监控指标与告警查询：节点状态、误码率、温度、负载等指标查询与告警列表获取。"
-        tags={[{ color: V.text3, text: 'SSE' }, { color: V.success, text: '已连接' }]}
-        source="来自 技能库 nacos"
-        actions={<Btn>断开</Btn>}
-        highlight
-      />
-    ) },
-    { scope: 'hpc' as Scope, card: (
-      <ItemCard
-        icon="调" iconColor="#2ea44f" name="调度器查询服务" meta="mcp-scheduler · 工具 5"
-        desc="HPC 调度器作业与队列查询：作业状态、队列资源占用、节点分配等信息获取。"
-        tags={[{ color: V.text3, text: 'Streamable HTTP' }, { color: V.success, text: '已连接' }]}
-        source="来自 技能库 nacos"
-        actions={<Btn>断开</Btn>}
-      />
-    ) },
-    { scope: 'os' as Scope, card: (
-      <ItemCard
-        icon="业" iconColor="#b26a00" name="高性能集群监控平台" meta="ks-scmms-ops · 工具 3"
-        desc="运维平台智能模块经 MCP 暴露的运维能力：metric-query（指标查询）、alarm-list（告警查询）、node-cmd-exec（节点命令执行·高危审批），支撑诊断结论的方案处置闭环。"
-        tags={[{ color: V.text3, text: 'Streamable HTTP' }, { color: V.success, text: '已连接' }]}
-        source="端点 http://192.168.10.95:9091/mcp · Bearer Token 认证"
-        actions={<Btn>断开</Btn>}
-      />
-    ) },
-    { scope: 'shared' as Scope, card: (
-      <ItemCard
-        icon="执" iconColor="#7a52c9" name="节点命令执行服务" meta="mcp-node-exec · 工具 3"
-        desc="集群节点命令执行：经 QUIC 隧道下发执行终端并回收结果，高危命令调用前强制人工审批。"
-        tags={[{ color: V.text3, text: 'stdio' }, { color: V.success, text: '已连接' }]}
-        source="来自 技能库 nacos"
-        actions={<Btn>断开</Btn>}
-      />
-    ) },
-    { scope: 'shared' as Scope, card: (
-      <ItemCard
-        icon="知" iconColor="#0e8a8a" name="知识库检索服务" meta="mcp-kbmatrix · 工具 4"
-        desc="KBMatrix 知识检索与维护接口封装：双路召回、条目维护与索引状态查询。"
-        tags={[{ color: V.text3, text: 'SSE' }, { color: V.warn, text: '重连中' }]}
-        source="来自 技能库 nacos"
-        actions={<Btn>查看</Btn>}
-      />
-    ) },
-  ].filter(s => vis(s.scope, role))
+/* ---------- MCP 接口管理（Nacos MCP 注册中心清单 + 连接/断开动态挂载，真实分页） ---------- */
+const MCP_PAGE_SIZE = 8
+
+function McpTab({ face }: { face: AiopsMcpFace }) {
+  const [keyword, setKeyword] = useState('')
+  const [page, setPage] = useState(1)
+  const [data, setData] = useState<AiopsMcpServerPage | undefined>(undefined)
+  const [querying, setQuerying] = useState(false)
+  const [paging, setPaging] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [busyName, setBusyName] = useState<string | null>(null)
+  const [detail, setDetail] = useState<AiopsMcpServerDetail | null>(null)
+  const [settings, setSettings] = useState<AiopsMcpSettings | undefined>(undefined)
+  const [switchSaving, setSwitchSaving] = useState(false)
+  const [configOpen, setConfigOpen] = useState(false)
+  const [configDraft, setConfigDraft] = useState<AiopsMcpSettings>({ registryOrigin: '', namespaceId: 'public', authToken: '', autoInvoke: true })
+  const [configError, setConfigError] = useState<string | null>(null)
+  const [configSaving, setConfigSaving] = useState(false)
+
+  const runQuery = useCallback(async (targetPage: number, intent: 'query' | 'page' = 'query') => {
+    const setBusyFlag = intent === 'page' ? setPaging : setQuerying
+    setBusyFlag(true)
+    try {
+      const result = await face.listServers({
+        ...(keyword.trim() === '' ? {} : { keyword: keyword.trim() }),
+        page: targetPage,
+        pageSize: MCP_PAGE_SIZE,
+      })
+      setData(result)
+      setPage(result.page)
+      setError(null)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusyFlag(false)
+    }
+  }, [face, keyword])
+
+  useEffect(() => {
+    void runQuery(1, 'page') // 仅挂载时首查（静默）；筛选变化由“查询”按钮触发
+    void face.getSettings().then(setSettings).catch(() => undefined)
+  }, [])
+
+  const openConfig = async () => {
+    setConfigError(null)
+    setConfigOpen(true)
+    try {
+      const current = await face.getSettings()
+      setSettings(current)
+      setConfigDraft(current)
+    } catch (reason: unknown) {
+      setConfigError(reason instanceof Error ? reason.message : String(reason))
+    }
+  }
+
+  const saveConfig = async () => {
+    if (configSaving) return
+    setConfigSaving(true)
+    setConfigError(null)
+    try {
+      const saved = await face.saveSettings({ ...configDraft, registryOrigin: configDraft.registryOrigin.trim() })
+      setSettings(saved)
+      setConfigOpen(false)
+      await runQuery(1)
+    } catch (reason: unknown) {
+      setConfigError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setConfigSaving(false)
+    }
+  }
+
+  const flipInvoke = async (value: boolean) => {
+    if (settings === undefined || switchSaving) return
+    const previous = settings
+    const next = { ...settings, autoInvoke: value }
+    setSettings(next)
+    setSwitchSaving(true)
+    try {
+      await face.saveSettings(next)
+      await runQuery(page, 'page')
+    } catch (reason: unknown) {
+      setSettings(previous)
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setSwitchSaving(false)
+    }
+  }
+
+  const connect = async (row: AiopsMcpServerRow) => {
+    if (busyName !== null) return
+    setBusyName(row.name)
+    try {
+      await face.connectServer(row.name)
+      await runQuery(page, 'page')
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusyName(null)
+    }
+  }
+
+  const disconnect = async (row: AiopsMcpServerRow) => {
+    if (busyName !== null) return
+    setBusyName(row.name)
+    try {
+      await face.disconnectServer(row.name)
+      await runQuery(page, 'page')
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusyName(null)
+    }
+  }
+
+  const openDetail = async (row: AiopsMcpServerRow) => {
+    if (busyName !== null) return
+    setBusyName(row.name)
+    try {
+      setDetail(await face.getServerDetail(row.name))
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusyName(null)
+    }
+  }
+
+  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / MCP_PAGE_SIZE))
+  const invokeOn = settings?.autoInvoke ?? true
+
   return (
     <div style={{ display: 'grid', gap: 12 }}>
       <FuncCard name="服务连接" kind="manage">
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-          <span style={{ ...card, padding: '4px 10px', fontSize: 12, color: V.text3, minWidth: 180 }}>查询：服务名称 / 标识</span>
-          <Btn>查询</Btn>
-          <Btn primary>添加 MCP Server</Btn>
-          <span style={{ marginLeft: 'auto', fontSize: 12, color: V.text3 }}>MCP Server 经 nacos 注册发现 · 断线重连</span>
+          <input
+            value={keyword}
+            onChange={(e) => { setKeyword(e.target.value) }}
+            onKeyDown={(e) => { if (e.key === 'Enter') void runQuery(1) }}
+            placeholder="查询：服务名称 / 描述"
+            style={{ padding: '5px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, minWidth: 200, background: 'transparent', color: V.text }}
+          />
+          <Btn primary disabled={querying} onClick={() => { void runQuery(1) }}>{querying ? '查询中…' : '查询'}</Btn>
+          <span style={{ marginLeft: 'auto' }}>
+            <Btn onClick={() => { void openConfig() }}>注册中心配置</Btn>
+          </span>
         </div>
-        <div style={grid}>{servers.map((s, i) => <span key={i} style={{ display: 'contents' }}>{s.card}</span>)}</div>
-        <Pager total={servers.length} unit="个 MCP Server" />
+        {error !== null && <div style={{ fontSize: 12.5, color: V.error, marginBottom: 10 }}>{error}</div>}
+        {data === undefined && error === null && <div style={{ fontSize: 12.5, color: V.text3 }}>加载中…</div>}
+        {data !== undefined && data.total === 0 && (
+          <div style={{ fontSize: 12.5, color: V.text3 }}>注册中心暂无匹配 MCP Server；注册发布在 Nacos 控制台完成。</div>
+        )}
+        {data !== undefined && data.total > 0 && (
+          <div style={grid}>
+            {data.rows.map(row => (
+              <ItemCard
+                key={row.name}
+                icon={row.name.replace(/^(mcp|ks)-/, '').slice(0, 1)} iconColor={row.connected ? '#2ea44f' : '#8a94a6'}
+                name={row.name} meta={`${row.name} · v${row.version}${row.toolCount === undefined ? '' : ` · 工具 ${row.toolCount}`}`}
+                desc={row.description}
+                tags={[
+                  { color: V.text3, text: row.transport },
+                  row.connected
+                    ? { color: V.success, text: '已连接' }
+                    : { color: V.text3, text: '未连接' },
+                ]}
+                highlight={row.connected}
+                actions={<span style={{ display: 'flex', gap: 6 }}>
+                  <Btn disabled={busyName === row.name} onClick={() => { void openDetail(row) }}>详情</Btn>
+                  {row.connected
+                    ? <Btn disabled={busyName === row.name} onClick={() => { void disconnect(row) }}>{busyName === row.name ? '断开中…' : '断开'}</Btn>
+                    : <Btn primary disabled={busyName === row.name || !invokeOn} onClick={() => { void connect(row) }}>{busyName === row.name ? '连接中…' : '连接'}</Btn>}
+                </span>}
+              />
+            ))}
+          </div>
+        )}
+        <Pager
+          total={data?.total ?? 0}
+          unit="个 MCP Server"
+          page={page}
+          pages={totalPages}
+          busy={querying || paging}
+          onPage={(next) => { void runQuery(next, 'page') }}
+        />
       </FuncCard>
       <FuncCard name="工具调用" kind="runtime">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <Note>执行引擎按推理决策自动调用 MCP 暴露的工具与资源，调用时按 JSON Schema 校验参数；节点命令执行类高危工具调用前经权限审批策略强制人工确认，全程审计留痕。</Note>
-          <Switch on={invoke} onChange={setInvoke} label="按推理决策自动调用工具" />
+          <Note>连接后 MCP Server 的工具即时挂载到本宿主，执行引擎按推理决策自动调用，调用时按 JSON Schema 校验参数；高危工具调用前经权限审批策略强制人工确认，全程审计留痕。关闭后断开全部连接且不再允许新连接。</Note>
+          <Switch
+            on={invokeOn}
+            onChange={(v) => { void flipInvoke(v) }}
+            label={invokeOn ? '按推理决策自动调用工具' : '已停用'}
+          />
         </div>
       </FuncCard>
+
+      {configOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
+          <div style={{ ...card, width: 420, padding: '16px 18px', display: 'grid', gap: 10, boxShadow: '0 12px 40px rgba(0,0,0,.28)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: V.text }}>注册中心配置</div>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>注册中心地址</span>
+              <input
+                value={configDraft.registryOrigin}
+                onChange={(e) => { setConfigDraft({ ...configDraft, registryOrigin: e.target.value }) }}
+                placeholder="http://192.168.10.95:9080"
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text, fontFamily: V.mono }}
+              />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>命名空间</span>
+              <input
+                value={configDraft.namespaceId}
+                onChange={(e) => { setConfigDraft({ ...configDraft, namespaceId: e.target.value }) }}
+                placeholder="public"
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text, fontFamily: V.mono }}
+              />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>MCP 对接 Token（连接时以 Bearer 携带）</span>
+              <input
+                type="password"
+                value={configDraft.authToken}
+                onChange={(e) => { setConfigDraft({ ...configDraft, authToken: e.target.value }) }}
+                placeholder="平台分配的对接口令"
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text, fontFamily: V.mono }}
+              />
+            </label>
+            {configError !== null && <div style={{ fontSize: 12.5, color: V.error }}>{configError}</div>}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Btn onClick={() => { setConfigOpen(false) }}>取消</Btn>
+              <Btn primary disabled={configSaving} onClick={() => { void saveConfig() }}>{configSaving ? '保存中…' : '保存'}</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {detail !== null && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
+          <div style={{ ...card, width: 480, padding: '16px 18px', display: 'grid', gap: 10, boxShadow: '0 12px 40px rgba(0,0,0,.28)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: V.text }}>MCP Server 详情</div>
+            <div style={{ fontSize: 12.5, color: V.text2, lineHeight: 1.9 }}>
+              <div>名称：<span style={{ fontFamily: V.mono }}>{detail.row.name}</span></div>
+              <div>版本：{detail.row.version} · 协议：{detail.row.transport}</div>
+              <div>端点：<span style={{ fontFamily: V.mono }}>{detail.row.url || '—'}</span></div>
+              <div>连接：{detail.row.connected ? '已连接（工具已挂载）' : '未连接'}</div>
+              <div style={{ marginTop: 6, borderTop: `1px solid ${V.border}`, paddingTop: 8 }}>{detail.row.description}</div>
+              {detail.tools.length > 0 && (
+                <div style={{ marginTop: 6, borderTop: `1px solid ${V.border}`, paddingTop: 8 }}>
+                  工具（{detail.tools.length}）：
+                  {detail.tools.map(tool => (
+                    <div key={tool.name} style={{ marginTop: 4 }}>
+                      <span style={{ fontFamily: V.mono, color: V.brand }}>{tool.name}</span>
+                      <span style={{ color: V.text3 }}> — {tool.description}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {detail.tools.length === 0 && !detail.row.connected && (
+                <div style={{ marginTop: 6, borderTop: `1px solid ${V.border}`, paddingTop: 8, color: V.text3 }}>连接后显示实际工具清单。</div>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Btn onClick={() => { setDetail(null) }}>关闭</Btn>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1310,7 +1512,7 @@ const TABS = [
   { key: 'skills', label: 'skills 管理', Icon: IconSkillOutlineRegular, View: undefined },
   { key: 'logs', label: '日志管理', Icon: IconChecklistOutlineRegular, View: undefined },
   { key: 'memory', label: '记忆管理', Icon: IconThinkOutlineRegular, View: undefined },
-  { key: 'mcp', label: 'MCP 接口管理', Icon: IconApiOutlineRegular, View: McpTab },
+  { key: 'mcp', label: 'MCP 接口管理', Icon: IconApiOutlineRegular, View: undefined },
 ] as const
 
 type TabKey = (typeof TABS)[number]['key']
@@ -1340,8 +1542,9 @@ export function AiopsConsolePage(props: {
   logs: AiopsLogsFace
   memory: AiopsMemoryFace
   skills: AiopsSkillsFace
+  mcp: AiopsMcpFace
 }) {
-  const { t, agents: agentsFace, logs: logsFace, memory: memoryFace, skills: skillsFace } = props
+  const { t, agents: agentsFace, logs: logsFace, memory: memoryFace, skills: skillsFace, mcp: mcpFace } = props
   // 初始页签：平台入口页跳转指定（pf_tab Cookie → consumeInitialTab），默认智能体管理
   const [tab, setTab] = useState<TabKey>(() => {
     const v = consumeInitialTab()
@@ -1400,9 +1603,11 @@ export function AiopsConsolePage(props: {
               ? <LogsTab face={logsFace} />
               : tab === 'skills'
                 ? <SkillsTab face={skillsFace} />
-                : tab === 'memory' || Active === undefined
-                  ? <MemoryTab face={memoryFace} />
-                  : <Active role={role} />}
+                : tab === 'mcp'
+                  ? <McpTab face={mcpFace} />
+                  : tab === 'memory' || Active === undefined
+                    ? <MemoryTab face={memoryFace} />
+                    : <Active role={role} />}
         </>
       )}
     </div>

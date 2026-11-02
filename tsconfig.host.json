@@ -241,6 +241,7 @@
     { "path": "./packages/aiops/log-controller" },
     { "path": "./packages/aiops/memory-controller" },
     { "path": "./packages/aiops/skill-controller" },
+    { "path": "./packages/aiops/mcp-controller" },
     { "path": "./packages/experimental/client-ui-cot-translation/tsconfig.host.json" },
     { "path": "./packages/experimental/cot-translation-bundle" },
     { "path": "./packages/experimental/session-search" },

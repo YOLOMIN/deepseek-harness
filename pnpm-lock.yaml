@@ -1312,6 +1312,25 @@ importers:
         specifier: workspace:*
         version: link:../agent-controller
 
+  packages/aiops/mcp-controller:
+    dependencies:
+      '@deepseek-ai/dsh-mcp-client':
+        specifier: workspace:*
+        version: link:../../mcp/mcp-client
+      '@deepseek-ai/dsh-typert-protocol':
+        specifier: workspace:*
+        version: link:../../typert/protocol
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+
   packages/aiops/memory-controller:
     dependencies:
       '@deepseek-ai/dsh-typert-protocol':
@@ -1400,6 +1419,9 @@ importers:
       '@gac2/dsh-aiops-log-controller':
         specifier: workspace:*
         version: link:../log-controller
+      '@gac2/dsh-aiops-mcp-controller':
+        specifier: workspace:*
+        version: link:../mcp-controller
       '@gac2/dsh-aiops-memory-controller':
         specifier: workspace:*
         version: link:../memory-controller
@@ -1684,6 +1706,9 @@ importers:
       '@gac2/dsh-aiops-log-controller':
         specifier: workspace:*
         version: link:../../aiops/log-controller
+      '@gac2/dsh-aiops-mcp-controller':
+        specifier: workspace:*
+        version: link:../../aiops/mcp-controller
       '@gac2/dsh-aiops-memory-controller':
         specifier: workspace:*
         version: link:../../aiops/memory-controller
@@ -3305,6 +3330,9 @@ importers:
       '@gac2/dsh-aiops-log-controller':
         specifier: workspace:*
         version: link:../../aiops/log-controller
+      '@gac2/dsh-aiops-mcp-controller':
+        specifier: workspace:*
+        version: link:../../aiops/mcp-controller
       '@gac2/dsh-aiops-memory-controller':
         specifier: workspace:*
         version: link:../../aiops/memory-controller

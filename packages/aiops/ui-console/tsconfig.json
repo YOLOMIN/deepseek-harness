@@ -17,6 +17,7 @@
     { "path": "../agent-controller" },
     { "path": "../log-controller" },
     { "path": "../memory-controller" },
-    { "path": "../skill-controller" }
+    { "path": "../skill-controller" },
+    { "path": "../mcp-controller" }
   ]
 }

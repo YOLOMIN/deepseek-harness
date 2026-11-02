@@ -49,6 +49,7 @@
     "@gac2/dsh-aiops-log-controller": "workspace:*",
     "@gac2/dsh-aiops-memory-controller": "workspace:*",
     "@gac2/dsh-aiops-skill-controller": "workspace:*",
+    "@gac2/dsh-aiops-mcp-controller": "workspace:*",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

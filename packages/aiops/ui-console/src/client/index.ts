@@ -14,6 +14,7 @@ import { createAiopsAgentsFace } from './agents-face.ts'
 import { createAiopsLogsFace } from './logs-face.ts'
 import { createAiopsMemoryFace } from './memory-face.ts'
 import { createAiopsSkillsFace } from './skills-face.ts'
+import { createAiopsMcpFace } from './mcp-face.ts'
 import { setInitialTab, setLayoutService } from './initial-tab.ts'
 import { en, NS, zh, type AiopsLocaleKey } from './locales.ts'
 
@@ -30,7 +31,7 @@ export { NS }
 export const PANEL_ID = 'aiops' as MainPanelId
 
 /** Services required by the sidebar registration and the page. */
-export const inject = ['slots', 'locale', 'layout', 'remote', 'remote.aiopsAgents', 'remote.aiopsLogs', 'remote.aiopsMemory', 'remote.aiopsSkills', 'uiWorkspace']
+export const inject = ['slots', 'locale', 'layout', 'remote', 'remote.aiopsAgents', 'remote.aiopsLogs', 'remote.aiopsMemory', 'remote.aiopsSkills', 'remote.aiopsMcp', 'uiWorkspace']
 
 /**
  * Contribute the aiops entry to the sidebar with the console page it opens.
@@ -50,6 +51,7 @@ export function apply(ctx: ClientContext): void {
       logs: createAiopsLogsFace(ctx),
       memory: createAiopsMemoryFace(ctx),
       skills: createAiopsSkillsFace(ctx),
+      mcp: createAiopsMcpFace(ctx),
     }),
   }, AiopsConsolePage))
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({

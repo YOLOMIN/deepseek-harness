@@ -1,0 +1,31 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/aiops/mcp-controller/README.md
+/:
+  en: 83499df04eaa20b6
+  zh: 11a566ca425e6735
+/gac2-dsh-aiops-mcp-controller:
+  en: 3e0bd7c9097e3f54
+  zh: 42f3a32496f82190
+/gac2-dsh-aiops-mcp-controller/summary:
+  en: df4e3c107b313918
+  zh: 91c3cf4ed00c3736
+/gac2-dsh-aiops-mcp-controller/table-of-contents:
+  en: 4e53164159b5ce41
+  zh: adc27a3c31c4d4ee
+/gac2-dsh-aiops-mcp-controller/use-this-package:
+  en: 9cf598104066dc5b
+  zh: 2fff757f6153d5d2
+/gac2-dsh-aiops-mcp-controller/model-experience:
+  en: eb779917a1bdcfd7
+  zh: f6edbdbaa3ce40d7
+/gac2-dsh-aiops-mcp-controller/model-experience/kv-cache-effect:
+  en: c8cb9885b5cdc8f3
+  zh: 73b58081504ae8fc
+/gac2-dsh-aiops-mcp-controller/known-limitations-and-deferred-work:
+  en: ec4e00052559bc0a
+  zh: 0960b4b5bfbdbe09
+/gac2-dsh-aiops-mcp-controller/known-limitations-and-deferred-work/dev-note:
+  en: bd7a7ceaaaa47ce0
+  zh: 1181b1cb876f8b88

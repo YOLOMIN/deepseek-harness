@@ -102,6 +102,7 @@
     "@gac2/dsh-aiops-agent-controller": "workspace:*",
     "@gac2/dsh-aiops-log-controller": "workspace:*",
     "@gac2/dsh-aiops-memory-controller": "workspace:*",
-    "@gac2/dsh-aiops-skill-controller": "workspace:*"
+    "@gac2/dsh-aiops-skill-controller": "workspace:*",
+    "@gac2/dsh-aiops-mcp-controller": "workspace:*"
   }
 }
