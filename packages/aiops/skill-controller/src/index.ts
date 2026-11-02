@@ -167,11 +167,13 @@ export class AiopsSkillController extends TypertRemoteService {
   /**
    * Install one registry skill: fetch its declared files from the well-known
    * surface (`{name}/{filePath}`) and write them into the local skills root.
+   * The wire name cannot be `install`/`remove`: RemoteNamespaceService owns
+   * those prototype members and rejects conflicting method names at mount.
    * @param input - skill name.
    * @returns confirmation with the installed directory.
    */
-  @Remote('install')
-  async install(input: { readonly name: string }): Promise<{ readonly installed: true; readonly path: string }> {
+  @Remote('installSkill')
+  async installSkill(input: { readonly name: string }): Promise<{ readonly installed: true; readonly path: string }> {
     const parsed = nameSchema.safeParse(input)
     if (!parsed.success) throw invalid('name', 'skill 名称无效')
     const name = parsed.data.name
@@ -216,8 +218,8 @@ export class AiopsSkillController extends TypertRemoteService {
    * @param input - skill name.
    * @returns confirmation of the removal.
    */
-  @Remote('uninstall')
-  async uninstall(input: { readonly name: string }): Promise<{ readonly removed: true }> {
+  @Remote('uninstallSkill')
+  async uninstallSkill(input: { readonly name: string }): Promise<{ readonly removed: true }> {
     const parsed = nameSchema.safeParse(input)
     if (!parsed.success) throw invalid('name', 'skill 名称无效')
     const target = join(this.config.skillsDir, parsed.data.name)

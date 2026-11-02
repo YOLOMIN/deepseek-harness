@@ -31,7 +31,7 @@ function unwrap<T>(result: { readonly ok: true; readonly value: T } | { readonly
 export function createAiopsSkillsFace(ctx: ClientContext): AiopsSkillsFace {
   return {
     listSkills: async input => unwrap(await ctx.remote.aiopsSkills.list(input)),
-    installSkill: async (name) => { unwrap(await ctx.remote.aiopsSkills.install({ name })) },
-    uninstallSkill: async (name) => { unwrap(await ctx.remote.aiopsSkills.uninstall({ name })) },
+    installSkill: async (name) => { unwrap(await ctx.remote.aiopsSkills.installSkill({ name })) },
+    uninstallSkill: async (name) => { unwrap(await ctx.remote.aiopsSkills.uninstallSkill({ name })) },
   }
 }

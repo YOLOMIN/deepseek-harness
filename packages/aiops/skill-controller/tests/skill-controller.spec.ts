@@ -76,7 +76,7 @@ describe('AiopsSkillController.list', () => {
   })
 })
 
-describe('AiopsSkillController.install/uninstall', () => {
+describe('AiopsSkillController.installSkill/uninstallSkill', () => {
   it('installs declared files into the skills root', async () => {
     const { controller, skillsDir } = fixture()
     stubFetch((url) => {
@@ -84,7 +84,7 @@ describe('AiopsSkillController.install/uninstall', () => {
       if (url.includes('/skill-a/SKILL.md')) return { bytes: new TextEncoder().encode('# A\n') }
       return { status: 404, json: {} }
     })
-    const result = await controller.install({ name: 'skill-a' })
+    const result = await controller.installSkill({ name: 'skill-a' })
     expect(result.installed).toBe(true)
     const { readFile } = await import('node:fs/promises')
     expect(await readFile(resolve(skillsDir, 'skill-a', 'SKILL.md'), 'utf8')).toBe('# A\n')
@@ -96,19 +96,19 @@ describe('AiopsSkillController.install/uninstall', () => {
       if (url.endsWith('/index.json')) return { json: { skills: [] } }
       return { status: 404, json: {} }
     })
-    await expect(controller.install({ name: 'skill-a' })).rejects.toMatchObject({ code: 'aiops-skills/not-found' })
+    await expect(controller.installSkill({ name: 'skill-a' })).rejects.toMatchObject({ code: 'aiops-skills/not-found' })
     stubFetch((url) => {
       if (url.endsWith('/index.json')) return { json: { skills: [{ name: 'skill-a', files: ['SKILL.md', 'ref/a.md'] }] } }
       if (url.includes('/skill-a/SKILL.md')) return { bytes: new TextEncoder().encode('# A\n') }
       return { status: 404, json: {} }
     })
-    await expect(controller.install({ name: 'skill-a' })).rejects.toMatchObject({ code: 'aiops-skills/upstream' })
+    await expect(controller.installSkill({ name: 'skill-a' })).rejects.toMatchObject({ code: 'aiops-skills/upstream' })
   })
 
   it('uninstall removes the local directory and reports missing registry versions', async () => {
     const { controller, skillsDir } = fixture()
     await mkdir(resolve(skillsDir, 'skill-a'), { recursive: true })
-    await controller.uninstall({ name: 'skill-a' })
-    await expect(controller.uninstall({ name: '' })).rejects.toMatchObject({ code: 'aiops-skills/invalid' })
+    await controller.uninstallSkill({ name: 'skill-a' })
+    await expect(controller.uninstallSkill({ name: '' })).rejects.toMatchObject({ code: 'aiops-skills/invalid' })
   })
 })
