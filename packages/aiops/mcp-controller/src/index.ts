@@ -166,15 +166,36 @@ export class AiopsMcpController extends TypertRemoteService {
     const settings = await this.effectiveSettings()
     // 注册表面对 limit 上限敏感（>100 返回 500 server limit match），取最大可用值后本地分页。
     const query = new URLSearchParams({ namespaceId: settings.namespaceId, limit: '100' })
-    let response: Response
-    try {
-      response = await fetch(`${settings.registryOrigin}/v0/servers?${query}`, { signal: AbortSignal.timeout(this.config.requestTimeoutMs) })
-    } catch (error: unknown) {
-      throw upstream('unreachable', `MCP 注册中心不可达：${error instanceof Error ? error.message : String(error)}`)
-    }
-    if (!response.ok) throw upstream(String(response.status), `MCP 注册中心返回 HTTP ${response.status}`)
-    const body = await response.json() as RegistryServerList
+    const body = await this.fetchJson(`${settings.registryOrigin}/v0/servers?${query}`, 'MCP 注册中心') as RegistryServerList
     return (body.servers ?? []).flatMap(entry => entry.server === undefined ? [] : [entry.server])
+  }
+
+  /**
+   * GET JSON with one retry: the registry host runs under heavy load and
+   * intermittently times out or 5xx's idempotent reads, so a single retry after
+   * a short pause smooths the console without masking persistent failures.
+   */
+  private async fetchJson(url: string, label: string): Promise<unknown> {
+    let lastError: unknown
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await new Promise(resolve => setTimeout(resolve, 1500))
+      try {
+        const response = await fetch(url, { signal: AbortSignal.timeout(this.config.requestTimeoutMs) })
+        if (response.ok) return await response.json()
+        if (response.status < 500) throw upstream(String(response.status), `${label}返回 HTTP ${response.status}`)
+        lastError = upstream(String(response.status), `${label}返回 HTTP ${response.status}（远端负载过高，已自动重试）`)
+      } catch (error: unknown) {
+        if (error instanceof RemoteError) throw error
+        const timeout = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+        lastError = upstream(
+          timeout ? 'timeout' : 'unreachable',
+          timeout
+            ? `${label}响应超时（>${this.config.requestTimeoutMs / 1000}s，远端负载过高，已自动重试）`
+            : `${label}不可达：${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+    }
+    throw lastError
   }
 
   /** Map one registry entry into the wire row. */

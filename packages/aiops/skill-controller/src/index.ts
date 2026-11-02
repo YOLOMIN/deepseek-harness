@@ -159,15 +159,36 @@ export class AiopsSkillController extends TypertRemoteService {
 
   /** GET the well-known index and validate its envelope. */
   private async fetchIndex(): Promise<readonly RegistrySkillEntry[]> {
-    let response: Response
-    try {
-      response = await fetch(`${await this.registryBase()}/index.json`, { signal: AbortSignal.timeout(this.config.requestTimeoutMs) })
-    } catch (error: unknown) {
-      throw upstream('unreachable', `技能库不可达：${error instanceof Error ? error.message : String(error)}`)
-    }
-    if (!response.ok) throw upstream(String(response.status), `技能库返回 HTTP ${response.status}`)
-    const body = await response.json() as RegistryIndex
+    const body = await this.fetchJson(`${await this.registryBase()}/index.json`, '技能库') as RegistryIndex
     return body.skills ?? []
+  }
+
+  /**
+   * GET JSON with one retry: the registry host runs under heavy load and
+   * intermittently times out or 5xx's idempotent reads, so a single retry after
+   * a short pause smooths the console without masking persistent failures.
+   */
+  private async fetchJson(url: string, label: string): Promise<unknown> {
+    let lastError: unknown
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await new Promise(resolve => setTimeout(resolve, 1500))
+      try {
+        const response = await fetch(url, { signal: AbortSignal.timeout(this.config.requestTimeoutMs) })
+        if (response.ok) return await response.json()
+        if (response.status < 500) throw upstream(String(response.status), `${label}返回 HTTP ${response.status}`)
+        lastError = upstream(String(response.status), `${label}返回 HTTP ${response.status}（远端负载过高，已自动重试）`)
+      } catch (error: unknown) {
+        if (error instanceof RemoteError) throw error
+        const timeout = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+        lastError = upstream(
+          timeout ? 'timeout' : 'unreachable',
+          timeout
+            ? `${label}响应超时（>${this.config.requestTimeoutMs / 1000}s，远端负载过高，已自动重试）`
+            : `${label}不可达：${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+    }
+    throw lastError
   }
 
   /** Map one index entry into the wire row (install state filled by the caller). */
@@ -322,15 +343,27 @@ export class AiopsSkillController extends TypertRemoteService {
 
   /** GET one skill file from the well-known surface as text. */
   private async fetchFile(name: string, filePath: string): Promise<string> {
-    let response: Response
     const url = `${await this.registryBase()}/${encodeURIComponent(name)}/${filePath.split('/').map(encodeURIComponent).join('/')}`
-    try {
-      response = await fetch(url, { signal: AbortSignal.timeout(this.config.requestTimeoutMs) })
-    } catch (error: unknown) {
-      throw upstream('unreachable', `技能库不可达：${error instanceof Error ? error.message : String(error)}`)
+    let lastError: unknown
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await new Promise(resolve => setTimeout(resolve, 1500))
+      try {
+        const response = await fetch(url, { signal: AbortSignal.timeout(this.config.requestTimeoutMs) })
+        if (response.ok) return await response.text()
+        if (response.status < 500) throw upstream(String(response.status), `下载 ${filePath} 失败：HTTP ${response.status}`)
+        lastError = upstream(String(response.status), `下载 ${filePath} 失败：HTTP ${response.status}（已自动重试）`)
+      } catch (error: unknown) {
+        if (error instanceof RemoteError) throw error
+        const timeout = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+        lastError = upstream(
+          timeout ? 'timeout' : 'unreachable',
+          timeout
+            ? `技能库响应超时（>${this.config.requestTimeoutMs / 1000}s，远端负载过高，已自动重试）`
+            : `技能库不可达：${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
     }
-    if (!response.ok) throw upstream(String(response.status), `下载 ${filePath} 失败：HTTP ${response.status}`)
-    return response.text()
+    throw lastError
   }
 
   /**

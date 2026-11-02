@@ -74,6 +74,21 @@ describe('AiopsMcpController.list', () => {
     expect(page.rows[0]?.name).toBe('ks-scmms-ops')
   })
 
+  it('retries once on abort and reports a friendly timeout message after two failures', async () => {
+    const { controller } = fixture()
+    let calls = 0
+    stubFetch(() => {
+      calls += 1
+      if (calls === 1) throw Object.assign(new Error('aborted'), { name: 'TimeoutError' })
+      return { json: { servers: [{ server: SERVER }] } }
+    })
+    const page = await controller.list({ page: 1, pageSize: 10 })
+    expect(page.total).toBe(1)
+    expect(calls).toBe(2)
+    stubFetch(() => { throw Object.assign(new Error('aborted'), { name: 'TimeoutError' }) })
+    await expect(controller.list({ page: 1, pageSize: 10 })).rejects.toThrow(/超时/)
+  })
+
   it('wraps registry failures as aiops-mcp/upstream', async () => {
     const { controller } = fixture()
     stubFetch(() => { throw new Error('connection refused') })

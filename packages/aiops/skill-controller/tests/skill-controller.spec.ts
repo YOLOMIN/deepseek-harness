@@ -70,6 +70,22 @@ describe('AiopsSkillController.list', () => {
     await expect(controller.list({ page: 1, pageSize: 10 })).rejects.toMatchObject({ code: 'aiops-skills/upstream' })
   })
 
+  it('retries once on abort and succeeds, with a friendly timeout message after two failures', async () => {
+    const { controller } = fixture()
+    let calls = 0
+    stubFetch(() => {
+      calls += 1
+      if (calls === 1) throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' })
+      return { json: { skills: [SUMMARY] } }
+    })
+    const page = await controller.list({ page: 1, pageSize: 10 })
+    expect(page.total).toBe(1)
+    expect(calls).toBe(2)
+    stubFetch(() => { throw Object.assign(new Error('aborted'), { name: 'AbortError' }) })
+    await expect(controller.list({ page: 1, pageSize: 10 })).rejects.toMatchObject({ code: 'aiops-skills/upstream' })
+    await expect(controller.list({ page: 1, pageSize: 10 })).rejects.toThrow(/超时/)
+  })
+
   it('rejects malformed queries at the wire boundary', async () => {
     const { controller } = fixture()
     await expect(controller.list({ page: 0, pageSize: 10 })).rejects.toMatchObject({ code: 'aiops-skills/invalid' })
