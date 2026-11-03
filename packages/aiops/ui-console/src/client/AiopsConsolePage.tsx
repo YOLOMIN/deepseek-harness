@@ -20,7 +20,7 @@ import type {
   AiopsSkillDetail, AiopsSkillPage, AiopsSkillRegistryConfig, AiopsSkillRow, AiopsSkillSettings, AiopsSkillStatus,
 } from '@gac2/dsh-aiops-skill-controller/types'
 import type {
-  AiopsMcpServerDetail, AiopsMcpServerPage, AiopsMcpServerRow, AiopsMcpSettings,
+  AiopsMcpRegisterInput, AiopsMcpServerDetail, AiopsMcpServerPage, AiopsMcpServerRow, AiopsMcpSettings,
 } from '@gac2/dsh-aiops-mcp-controller/types'
 import type { AiopsLocaleKey } from './locales.ts'
 import {
@@ -1250,7 +1250,14 @@ function McpTab({ face }: { face: AiopsMcpFace }) {
   const [settings, setSettings] = useState<AiopsMcpSettings | undefined>(undefined)
   const [switchSaving, setSwitchSaving] = useState(false)
   const [configOpen, setConfigOpen] = useState(false)
-  const [configDraft, setConfigDraft] = useState<AiopsMcpSettings>({ registryOrigin: '', namespaceId: 'public', authToken: '', autoInvoke: true })
+  const [configDraft, setConfigDraft] = useState<AiopsMcpSettings>({
+    registryOrigin: '', namespaceId: 'public', authToken: '', consoleOrigin: '', consoleUsername: '', consolePassword: '', autoInvoke: true,
+  })
+  const [registerOpen, setRegisterOpen] = useState(false)
+  const [registerDraft, setRegisterDraft] = useState<AiopsMcpRegisterInput>({ name: '', description: '', url: '', version: '1.0.0' })
+  const [registerError, setRegisterError] = useState<string | null>(null)
+  const [registerSaving, setRegisterSaving] = useState(false)
+  const [unregistering, setUnregistering] = useState<AiopsMcpServerRow | null>(null)
   const [configError, setConfigError] = useState<string | null>(null)
   const [configSaving, setConfigSaving] = useState(false)
 
@@ -1295,7 +1302,11 @@ function McpTab({ face }: { face: AiopsMcpFace }) {
     setConfigSaving(true)
     setConfigError(null)
     try {
-      const saved = await face.saveSettings({ ...configDraft, registryOrigin: configDraft.registryOrigin.trim() })
+      const saved = await face.saveSettings({
+        ...configDraft,
+        registryOrigin: configDraft.registryOrigin.trim(),
+        consoleOrigin: configDraft.consoleOrigin.trim(),
+      })
       setSettings(saved)
       setConfigOpen(false)
       await runQuery(1)
@@ -1303,6 +1314,42 @@ function McpTab({ face }: { face: AiopsMcpFace }) {
       setConfigError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       setConfigSaving(false)
+    }
+  }
+
+  const submitRegister = async () => {
+    if (registerSaving) return
+    setRegisterSaving(true)
+    setRegisterError(null)
+    try {
+      await face.registerServer({
+        name: registerDraft.name.trim(),
+        description: registerDraft.description.trim(),
+        url: registerDraft.url.trim(),
+        ...(registerDraft.version === undefined || registerDraft.version.trim() === '' ? {} : { version: registerDraft.version.trim() }),
+      })
+      setRegisterOpen(false)
+      setRegisterDraft({ name: '', description: '', url: '', version: '1.0.0' })
+      await runQuery(1)
+    } catch (reason: unknown) {
+      setRegisterError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setRegisterSaving(false)
+    }
+  }
+
+  const confirmUnregister = async () => {
+    if (unregistering === null || busyName !== null) return
+    setBusyName(unregistering.name)
+    try {
+      await face.unregisterServer(unregistering.name)
+      setUnregistering(null)
+      setDetail(null)
+      await runQuery(page, 'page')
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusyName(null)
     }
   }
 
@@ -1376,6 +1423,7 @@ function McpTab({ face }: { face: AiopsMcpFace }) {
             style={{ padding: '5px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, minWidth: 200, background: 'transparent', color: V.text }}
           />
           <Btn primary disabled={querying} onClick={() => { void runQuery(1) }}>{querying ? '查询中…' : '查询'}</Btn>
+          <Btn primary onClick={() => { setRegisterError(null); setRegisterOpen(true) }}>添加 MCP Server</Btn>
           <span style={{ marginLeft: 'auto' }}>
             <Btn onClick={() => { void openConfig() }}>注册中心配置</Btn>
           </span>
@@ -1383,7 +1431,7 @@ function McpTab({ face }: { face: AiopsMcpFace }) {
         {error !== null && <div style={{ fontSize: 12.5, color: V.error, marginBottom: 10 }}>{error}</div>}
         {data === undefined && error === null && <div style={{ fontSize: 12.5, color: V.text3 }}>加载中…</div>}
         {data !== undefined && data.total === 0 && (
-          <div style={{ fontSize: 12.5, color: V.text3 }}>注册中心暂无匹配 MCP Server；注册发布在 Nacos 控制台完成。</div>
+          <div style={{ fontSize: 12.5, color: V.text3 }}>注册中心暂无匹配 MCP Server，可点「添加 MCP Server」注册。</div>
         )}
         {data !== undefined && data.total > 0 && (
           <div style={grid}>
@@ -1462,6 +1510,32 @@ function McpTab({ face }: { face: AiopsMcpFace }) {
                 style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text, fontFamily: V.mono }}
               />
             </label>
+            <div style={{ borderTop: `1px solid ${V.border}`, paddingTop: 8, fontSize: 12, color: V.text3 }}>注册/注销写入所用的 Nacos 控制台账号：</div>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>控制台地址</span>
+              <input
+                value={configDraft.consoleOrigin}
+                onChange={(e) => { setConfigDraft({ ...configDraft, consoleOrigin: e.target.value }) }}
+                placeholder="http://192.168.10.95:8080"
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text, fontFamily: V.mono }}
+              />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>控制台账号 / 密码</span>
+              <input
+                value={configDraft.consoleUsername}
+                onChange={(e) => { setConfigDraft({ ...configDraft, consoleUsername: e.target.value }) }}
+                placeholder="nacos"
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text, fontFamily: V.mono }}
+              />
+              <input
+                type="password"
+                value={configDraft.consolePassword}
+                onChange={(e) => { setConfigDraft({ ...configDraft, consolePassword: e.target.value }) }}
+                placeholder="控制台密码"
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text, fontFamily: V.mono }}
+              />
+            </label>
             {configError !== null && <div style={{ fontSize: 12.5, color: V.error }}>{configError}</div>}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <Btn onClick={() => { setConfigOpen(false) }}>取消</Btn>
@@ -1497,7 +1571,73 @@ function McpTab({ face }: { face: AiopsMcpFace }) {
               )}
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Btn danger onClick={() => { setUnregistering(detail.row) }}>注销</Btn>
               <Btn onClick={() => { setDetail(null) }}>关闭</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {registerOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
+          <div style={{ ...card, width: 440, padding: '16px 18px', display: 'grid', gap: 10, boxShadow: '0 12px 40px rgba(0,0,0,.28)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: V.text }}>添加 MCP Server</div>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>名称（字母数字、-、_，≤32 字符）</span>
+              <input
+                value={registerDraft.name}
+                onChange={(e) => { setRegisterDraft({ ...registerDraft, name: e.target.value }) }}
+                placeholder="mcp-monitor"
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text, fontFamily: V.mono }}
+              />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>端点 URL（streamable-http）</span>
+              <input
+                value={registerDraft.url}
+                onChange={(e) => { setRegisterDraft({ ...registerDraft, url: e.target.value }) }}
+                placeholder="http://192.168.10.95:9091/mcp"
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text, fontFamily: V.mono }}
+              />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>描述</span>
+              <input
+                value={registerDraft.description}
+                onChange={(e) => { setRegisterDraft({ ...registerDraft, description: e.target.value }) }}
+                placeholder="该 MCP Server 提供的能力说明"
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text }}
+              />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>版本</span>
+              <input
+                value={registerDraft.version ?? ''}
+                onChange={(e) => { setRegisterDraft({ ...registerDraft, version: e.target.value }) }}
+                placeholder="1.0.0"
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text, fontFamily: V.mono }}
+              />
+            </label>
+            <div style={{ fontSize: 12, color: V.text3 }}>注册时将自动握手端点发现并登记工具清单；对接 Token 取「注册中心配置」中的值。</div>
+            {registerError !== null && <div style={{ fontSize: 12.5, color: V.error }}>{registerError}</div>}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Btn onClick={() => { setRegisterOpen(false) }}>取消</Btn>
+              <Btn primary disabled={registerSaving} onClick={() => { void submitRegister() }}>{registerSaving ? '注册中…' : '注册'}</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {unregistering !== null && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
+          <div style={{ ...card, width: 380, padding: '16px 18px', display: 'grid', gap: 10, boxShadow: '0 12px 40px rgba(0,0,0,.28)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: V.text }}>注销 MCP Server</div>
+            <div style={{ fontSize: 13, color: V.text2, lineHeight: 1.7 }}>
+              确认从注册中心注销「{unregistering.name}」？本机的连接会先行断开，注册条目删除后不可恢复（可重新注册）。
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Btn onClick={() => { setUnregistering(null) }}>取消</Btn>
+              <Btn danger onClick={() => { void confirmUnregister() }}>{busyName === unregistering.name ? '注销中…' : '确认注销'}</Btn>
             </div>
           </div>
         </div>

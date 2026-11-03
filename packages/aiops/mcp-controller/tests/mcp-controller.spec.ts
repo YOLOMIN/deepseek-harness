@@ -13,18 +13,23 @@ function fixture() {
     registryOrigin: 'http://registry.test',
     namespaceId: 'public',
     authToken: 'tok',
+    consoleOrigin: 'http://console.test:8080',
+    consoleUsername: 'nacos',
+    consolePassword: 'nacos',
     settingsPath: resolve(dir, 'settings.json'),
     requestTimeoutMs: 5000,
+    consoleTimeoutMs: 10000,
   }
   const controller = new AiopsMcpController(ctx, config)
   return { controller, dir }
 }
 
 /** Stub globalThis.fetch with the given handler; restore in afterEach. */
-function stubFetch(handler: (url: string, init?: unknown) => { status?: number; json?: unknown; headers?: Record<string, string> }): void {
-  vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+type FetchAnswer = { status?: number; json?: unknown; headers?: Record<string, string> }
+function stubFetch(handler: (url: string, init?: { method?: string; body?: string }) => FetchAnswer): void {
+  vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: unknown) => {
     const url = typeof input === 'string' ? input : (input as URL).toString()
-    const answer = handler(url)
+    const answer = handler(url, init as { method?: string; body?: string } | undefined)
     return new Response(JSON.stringify(answer.json ?? {}), {
       status: answer.status ?? 200,
       headers: answer.headers ?? {},
@@ -47,6 +52,9 @@ const SETTINGS = {
   registryOrigin: 'http://override.test:9080',
   namespaceId: 'ops',
   authToken: 'tok2',
+  consoleOrigin: 'http://console.test:8080',
+  consoleUsername: 'nacos',
+  consolePassword: 'nacos',
   autoInvoke: true,
 }
 
@@ -102,7 +110,13 @@ describe('AiopsMcpController settings', () => {
   it('falls back to plugin config and honors the persisted override', async () => {
     const { controller, dir } = fixture()
     expect(await controller.getSettings()).toEqual({
-      registryOrigin: 'http://registry.test', namespaceId: 'public', authToken: 'tok', autoInvoke: true,
+      registryOrigin: 'http://registry.test',
+      namespaceId: 'public',
+      authToken: 'tok',
+      consoleOrigin: 'http://console.test:8080',
+      consoleUsername: 'nacos',
+      consolePassword: 'nacos',
+      autoInvoke: true,
     })
     await controller.saveSettings(SETTINGS)
     expect(await controller.getSettings()).toEqual(SETTINGS)
@@ -152,5 +166,55 @@ describe('AiopsMcpController detail/connect guards', () => {
       return { status: 401, json: {} }
     })
     await expect(controller.connect({ name: 'ks-scmms-ops' })).rejects.toMatchObject({ code: 'aiops-mcp/connect' })
+  })
+})
+
+describe('AiopsMcpController register/unregister', () => {
+  it('discovers tools by handshake and writes server/tool specs through the console', async () => {
+    const { controller } = fixture()
+    const calls: Array<{ url: string; method: string }> = []
+    stubFetch((url, init) => {
+      calls.push({ url, method: init?.method ?? 'GET' })
+      if (url.includes('/v0/servers')) return { json: { servers: [] } }
+      if (url.endsWith('/v1/auth/login')) return { json: { accessToken: 'tok-console' } }
+      if (url.includes('/v3/console/ai/mcp')) return { json: { code: 0, data: 'id-1' } }
+      if (url.includes('192.168.10.95:9091/mcp')) {
+        const body = JSON.parse(init?.body ?? '{}') as { method?: string }
+        if (body.method === 'initialize') return { json: { result: { capabilities: {} } }, headers: { 'mcp-session-id': 's1' } }
+        if (body.method === 'notifications/initialized') return { json: {} }
+        if (body.method === 'tools/list') {
+          return { json: { result: { tools: [{ name: 'metric-query', description: 'q', inputSchema: { type: 'object' } }] } } }
+        }
+      }
+      return { status: 404, json: {} }
+    })
+    const result = await controller.register({ name: 'ks-scmms-ops', description: 'd', url: 'http://192.168.10.95:9091/mcp' })
+    expect(result).toEqual({ registered: true, toolCount: 1 })
+    const write = calls.find(call => call.url.includes('/v3/console/ai/mcp'))
+    expect(write?.method).toBe('POST')
+    expect(write?.url).toContain('accessToken=tok-console')
+  })
+
+  it('unregisters through the console and tolerates a missing live connection', async () => {
+    const { controller } = fixture()
+    const calls: Array<{ url: string; method: string }> = []
+    stubFetch((url, init) => {
+      calls.push({ url, method: init?.method ?? 'GET' })
+      if (url.endsWith('/v1/auth/login')) return { json: { accessToken: 'tok-console' } }
+      if (url.includes('/v3/console/ai/mcp')) return { json: { code: 0, data: 'ok' } }
+      return { json: { servers: [] } }
+    })
+    await expect(controller.unregister({ name: 'ks-scmms-ops' })).resolves.toEqual({ unregistered: true })
+    const write = calls.find(call => call.url.includes('/v3/console/ai/mcp'))
+    expect(write?.method).toBe('DELETE')
+  })
+
+  it('rejects duplicate registration and invalid input at the wire boundary', async () => {
+    const { controller } = fixture()
+    stubFetch(() => ({ json: { servers: [{ server: SERVER }] } }))
+    await expect(controller.register({ name: 'ks-scmms-ops', description: '', url: 'http://x.test/mcp' }))
+      .rejects.toMatchObject({ code: 'aiops-mcp/invalid' })
+    await expect(controller.register({ name: 'bad name!', description: '', url: 'http://x.test/mcp' }))
+      .rejects.toMatchObject({ code: 'aiops-mcp/invalid' })
   })
 })

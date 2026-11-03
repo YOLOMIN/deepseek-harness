@@ -19,7 +19,7 @@ import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typer
 import { apply as applyMcpClient, inject as mcpClientInject } from '@deepseek-ai/dsh-mcp-client'
 import { z as zod } from 'zod'
 import type {
-  AiopsMcpQuery, AiopsMcpServerDetail, AiopsMcpServerPage, AiopsMcpServerRow, AiopsMcpSettings,
+  AiopsMcpQuery, AiopsMcpRegisterInput, AiopsMcpServerDetail, AiopsMcpServerPage, AiopsMcpServerRow, AiopsMcpSettings,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -32,10 +32,18 @@ export interface Config {
   namespaceId: string
   /** Default bearer token for server endpoints; the console override wins. */
   authToken: string
+  /** Nacos console origin for register/unregister writes. */
+  consoleOrigin: string
+  /** Default Nacos console account for register/unregister; the console override wins. */
+  consoleUsername: string
+  /** Default Nacos console password for register/unregister; the console override wins. */
+  consolePassword: string
   /** Settings override file; defaults to `~/.dsh/aiops-mcp-registry.json`. */
   settingsPath: string
   /** Registry and MCP handshake request timeout in milliseconds. */
   requestTimeoutMs: number
+  /** Console login/write timeout in milliseconds; the console host runs slower under load. */
+  consoleTimeoutMs: number
 }
 
 /** Validated deployment choices. */
@@ -43,8 +51,12 @@ export const Config = z.object({
   registryOrigin: z.string().pattern(/^https?:\/\/[^\s]+$/u).required(),
   namespaceId: z.string().min(1).default('public'),
   authToken: z.string().default(''),
+  consoleOrigin: z.string().pattern(/^https?:\/\/[^\s]+$/u).default('http://192.168.10.95:8080'),
+  consoleUsername: z.string().default(''),
+  consolePassword: z.string().default(''),
   settingsPath: z.string().min(1).default(join(homedir(), '.dsh', 'aiops-mcp-registry.json')),
   requestTimeoutMs: z.number().min(1000).max(60_000).default(15_000),
+  consoleTimeoutMs: z.number().min(5000).max(120_000).default(60_000),
 })
 
 const querySchema = zod.object({
@@ -55,12 +67,22 @@ const querySchema = zod.object({
 
 const nameSchema = zod.object({ name: zod.string().min(1) })
 
-/** Persisted override; the switch defaults on for files written before it existed. */
+/** Persisted override; the switch defaults on and console credentials default to the plugin Config. */
 const settingsSchema = zod.object({
   registryOrigin: zod.string().regex(/^https?:\/\/\S+$/u, '注册中心地址必须是 http(s) URL'),
   namespaceId: zod.string().min(1),
   authToken: zod.string().default(''),
+  consoleOrigin: zod.string().default(''),
+  consoleUsername: zod.string().default(''),
+  consolePassword: zod.string().default(''),
   autoInvoke: zod.boolean().default(true),
+})
+
+const registerSchema = zod.object({
+  name: zod.string().regex(/^[A-Za-z0-9_-]{1,32}$/u, '名称仅限字母数字、-、_，≤32 字符'),
+  description: zod.string().default(''),
+  url: zod.string().regex(/^https?:\/\/\S+$/u, '端点必须是 http(s) URL'),
+  version: zod.string().default('1.0.0'),
 })
 
 function invalid(field: string, message: string): RemoteError {
@@ -86,7 +108,7 @@ interface RegistryServerList {
 /** One live connection: the mounted mcp-client fiber plus the handshake-observed tools. */
 interface Connection {
   readonly fiber: Fiber
-  readonly tools: ReadonlyArray<{ readonly name: string; readonly description: string }>
+  readonly tools: ReadonlyArray<{ readonly name: string; readonly description: string; readonly inputSchema?: unknown }>
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -134,7 +156,14 @@ export class AiopsMcpController extends TypertRemoteService {
     if (raw !== undefined) {
       try {
         const parsed = settingsSchema.safeParse(JSON.parse(raw))
-        if (parsed.success) return parsed.data
+        if (parsed.success) {
+          return {
+            ...parsed.data,
+            consoleOrigin: parsed.data.consoleOrigin === '' ? this.config.consoleOrigin : parsed.data.consoleOrigin,
+            consoleUsername: parsed.data.consoleUsername === '' ? this.config.consoleUsername : parsed.data.consoleUsername,
+            consolePassword: parsed.data.consolePassword === '' ? this.config.consolePassword : parsed.data.consolePassword,
+          }
+        }
       } catch {
         // JSON 损坏等价于无覆盖，避免阻塞清单查询
       }
@@ -143,6 +172,9 @@ export class AiopsMcpController extends TypertRemoteService {
       registryOrigin: this.config.registryOrigin,
       namespaceId: this.config.namespaceId,
       authToken: this.config.authToken,
+      consoleOrigin: this.config.consoleOrigin,
+      consoleUsername: this.config.consoleUsername,
+      consolePassword: this.config.consolePassword,
       autoInvoke: true,
     }
   }
@@ -301,6 +333,128 @@ export class AiopsMcpController extends TypertRemoteService {
   }
 
   /**
+   * Register one MCP server into the Nacos registry: handshake the endpoint to
+   * discover its tools, then write server/endpoint/tool specifications through
+   * the console admin API.
+   * @param input - name, description, endpoint URL, optional version.
+   * @returns confirmation with the discovered tool count.
+   */
+  @Remote('register')
+  async register(input: AiopsMcpRegisterInput): Promise<{ readonly registered: true; readonly toolCount: number }> {
+    const parsed = registerSchema.safeParse(input)
+    if (!parsed.success) throw invalid('input', `注册参数无效：${parsed.error.issues[0]?.message ?? 'unknown'}`)
+    const { name, description, url, version } = parsed.data
+    if ((await this.fetchServers()).some(row => row.name === name)) {
+      throw invalid('name', `注册中心已存在同名 MCP Server：${name}`)
+    }
+    const settings = await this.effectiveSettings()
+    const tools = await this.handshake(name, url, settings.authToken)
+    const endpoint = new URL(url)
+    const body = new URLSearchParams({
+      namespaceId: settings.namespaceId,
+      mcpName: name,
+      serverSpecification: JSON.stringify({
+        name,
+        protocol: 'mcp-streamable',
+        frontProtocol: 'mcp-streamable',
+        description,
+        versionDetail: { version },
+        remoteServerConfig: { exportPath: endpoint.pathname === '' ? '/' : endpoint.pathname },
+        capabilities: ['TOOL'],
+        enabled: true,
+      }),
+      endpointSpecification: JSON.stringify({
+        type: 'DIRECT',
+        data: {
+          address: endpoint.hostname,
+          port: endpoint.port === '' ? (endpoint.protocol === 'https:' ? '443' : '80') : endpoint.port,
+          protocol: endpoint.protocol.replace(':', ''),
+        },
+      }),
+      toolSpecification: JSON.stringify({
+        tools: tools.map(tool => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })),
+      }),
+    })
+    await this.consoleWrite(settings, 'POST', '/v3/console/ai/mcp', body, name)
+    return { registered: true, toolCount: tools.length }
+  }
+
+  /**
+   * Unregister one MCP server from the Nacos registry; a live connection here
+   * is disposed first. The local tools disappear with the registry entry.
+   * @param input - server name.
+   * @returns confirmation of the removal.
+   */
+  @Remote('unregister')
+  async unregister(input: { readonly name: string }): Promise<{ readonly unregistered: true }> {
+    const parsed = nameSchema.safeParse(input)
+    if (!parsed.success) throw invalid('name', 'MCP Server 名称无效')
+    const name = parsed.data.name
+    const settings = await this.effectiveSettings()
+    const body = new URLSearchParams({ namespaceId: settings.namespaceId, mcpName: name })
+    await this.consoleWrite(settings, 'DELETE', '/v3/console/ai/mcp', body, name)
+    await this.disconnectOne(name)
+    return { unregistered: true }
+  }
+
+  /** Nacos console access token, cached for 30 minutes per settings change. */
+  private consoleTokenCache: { token: string; expiresAt: number } | undefined
+
+  /** One console admin write (POST/PUT/DELETE) with a cached login token. */
+  private async consoleWrite(settings: AiopsMcpSettings, method: string, path: string, body: URLSearchParams, name: string): Promise<void> {
+    if (settings.consoleUsername === '' || settings.consolePassword === '') {
+      throw invalid('console', '未配置 Nacos 控制台账号：请在「注册中心配置」中填写控制台账号与密码')
+    }
+    const token = await this.consoleToken(settings)
+    let response: Response
+    try {
+      response = await fetch(`${settings.consoleOrigin}${path}?accessToken=${encodeURIComponent(token)}`, {
+        method,
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+        signal: AbortSignal.timeout(this.config.consoleTimeoutMs),
+      })
+    } catch (error: unknown) {
+      throw new RemoteError('aiops-mcp/register', `控制台写入不可达：${error instanceof Error ? error.message : String(error)}`, { name })
+    }
+    if (!response.ok) {
+      const text = (await response.text()).slice(0, 200)
+      throw new RemoteError('aiops-mcp/register', `控制台写入失败：HTTP ${response.status} ${text}`, { name })
+    }
+    const result = await response.json() as { code?: number; message?: string }
+    if (result.code !== undefined && result.code !== 0) {
+      throw new RemoteError('aiops-mcp/register', `控制台写入被拒：${result.message ?? 'unknown'}`, { name })
+    }
+  }
+
+  /** Login to the Nacos console once per 30 minutes and reuse the access token. */
+  private async consoleToken(settings: AiopsMcpSettings): Promise<string> {
+    if (this.consoleTokenCache !== undefined && Date.now() < this.consoleTokenCache.expiresAt) {
+      return this.consoleTokenCache.token
+    }
+    let response: Response
+    try {
+      response = await fetch(`${settings.consoleOrigin}/v1/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ username: settings.consoleUsername, password: settings.consolePassword }),
+        signal: AbortSignal.timeout(this.config.consoleTimeoutMs),
+      })
+    } catch (error: unknown) {
+      throw new RemoteError('aiops-mcp/register', `控制台登录不可达：${error instanceof Error ? error.message : String(error)}`, { name: '-' })
+    }
+    if (!response.ok) {
+      throw new RemoteError('aiops-mcp/register', `控制台登录失败：HTTP ${response.status}（请检查控制台账号密码）`, { name: '-' })
+    }
+    const body = await response.json() as { accessToken?: string }
+    if (body.accessToken === undefined) {
+      throw new RemoteError('aiops-mcp/register', '控制台登录响应缺少 accessToken', { name: '-' })
+    }
+    this.consoleTokenCache = { token: body.accessToken, expiresAt: Date.now() + 30 * 60_000 }
+    return body.accessToken
+  }
+
+  /**
    * Read the settings the console shows and the operations use.
    * @returns the effective registry connection, token presence, and the switch.
    */
@@ -371,10 +525,16 @@ export class AiopsMcpController extends TypertRemoteService {
       throw new RemoteError('aiops-mcp/connect', `tools/list 失败：HTTP ${listResponse.status}`, { name })
     }
     const payload = await listResponse.json() as {
-      result?: { tools?: ReadonlyArray<{ name?: string; description?: string }> }
+      result?: { tools?: ReadonlyArray<{ name?: string; description?: string; inputSchema?: unknown }> }
     }
     return (payload.result?.tools ?? []).flatMap(tool =>
-      tool.name === undefined ? [] : [{ name: tool.name, description: tool.description ?? '' }])
+      tool.name === undefined
+        ? []
+        : [{
+          name: tool.name,
+          description: tool.description ?? '',
+          ...(tool.inputSchema === undefined ? {} : { inputSchema: tool.inputSchema }),
+        }])
   }
 
   /** Mount one mcp-client plugin instance for the server; returns its fiber handle. */

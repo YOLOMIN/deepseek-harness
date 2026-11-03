@@ -8,7 +8,7 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@gac2/dsh-aiops-mcp-controller/remote'
 import type {
-  AiopsMcpQuery, AiopsMcpServerDetail, AiopsMcpServerPage, AiopsMcpSettings,
+  AiopsMcpQuery, AiopsMcpRegisterInput, AiopsMcpServerDetail, AiopsMcpServerPage, AiopsMcpSettings,
 } from '@gac2/dsh-aiops-mcp-controller/types'
 
 /** MCP tab data and action surface injected by the plugin apply closure. */
@@ -21,6 +21,10 @@ export interface AiopsMcpFace {
   connectServer: (name: string) => Promise<number>
   /** Disconnect one server: unmount its tools from this host. */
   disconnectServer: (name: string) => Promise<void>
+  /** Register one MCP server into the Nacos registry (tools discovered by handshake). */
+  registerServer: (input: AiopsMcpRegisterInput) => Promise<number>
+  /** Unregister one MCP server from the Nacos registry. */
+  unregisterServer: (name: string) => Promise<void>
   /** Read the effective settings (console override or plugin config). */
   getSettings: () => Promise<AiopsMcpSettings>
   /** Persist the settings override; later operations use it immediately. */
@@ -43,6 +47,8 @@ export function createAiopsMcpFace(ctx: ClientContext): AiopsMcpFace {
     getServerDetail: async name => unwrap(await ctx.remote.aiopsMcp.detail({ name })),
     connectServer: async name => unwrap(await ctx.remote.aiopsMcp.connect({ name })).toolCount,
     disconnectServer: async (name) => { unwrap(await ctx.remote.aiopsMcp.disconnect({ name })) },
+    registerServer: async input => unwrap(await ctx.remote.aiopsMcp.register(input)).toolCount,
+    unregisterServer: async (name) => { unwrap(await ctx.remote.aiopsMcp.unregister({ name })) },
     getSettings: async () => unwrap(await ctx.remote.aiopsMcp.getSettings()),
     saveSettings: async input => unwrap(await ctx.remote.aiopsMcp.saveSettings(input)),
   }

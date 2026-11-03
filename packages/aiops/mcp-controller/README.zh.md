@@ -23,7 +23,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-在 Web 组合中挂载 `@gac2/dsh-aiops-mcp-controller`（见 `aiops.patch.yml`）。配置字段：`registryOrigin`（必填，如 `http://192.168.10.95:9080`）、`namespaceId`（默认 `public`）、`authToken`（默认空；连接时以 Bearer 携带的对接口令）、`settingsPath`（默认 `~/.dsh/aiops-mcp-registry.json`）、`requestTimeoutMs`（默认 15000）。控制台经 `ctx.remote.aiopsMcp.list` 查询、`detail` 查看详情、按名称连接/断开。注册中心配置弹窗与调用开关经 `getSettings`/`saveSettings` 读写；覆盖值持久化在 DSH 用户根目录旁，保存即生效。关闭自动调用会断开全部已连接服务并拒绝新连接。类上声明 `inject: ['tools']`，因为动态挂载的 mcp-client 子插件只能经本上下文解析服务。
+在 Web 组合中挂载 `@gac2/dsh-aiops-mcp-controller`（见 `aiops.patch.yml`）。配置字段：`registryOrigin`（必填，如 `http://192.168.10.95:9080`）、`namespaceId`（默认 `public`）、`authToken`（默认空；连接时以 Bearer 携带的对接口令）、`consoleOrigin`/`consoleUsername`/`consolePassword`（注册/注销写入所用的 Nacos 控制台账号）、`settingsPath`（默认 `~/.dsh/aiops-mcp-registry.json`）、`requestTimeoutMs`（默认 15000）、`consoleTimeoutMs`（默认 60000；控制台写入在高负载下更慢）。控制台经 `ctx.remote.aiopsMcp.list` 查询、`detail` 查看详情、按名称连接/断开，经 `register`（先握手端点发现工具清单再写控制台 API）/ `unregister` 注册与注销。注册中心配置弹窗与调用开关经 `getSettings`/`saveSettings` 读写；覆盖值持久化在 DSH 用户根目录旁，保存即生效。关闭自动调用会断开全部已连接服务并拒绝新连接。类上声明 `inject: ['tools']`，因为动态挂载的 mcp-client 子插件只能经本上下文解析服务。
 
 ## 模型体验
 
@@ -39,7 +39,7 @@ kind: "package-reference"
 
 - 连接状态保存在内存：宿主重启后全部视为未连接，需在控制台重新连接。
 - 工具清单在连接握手时观测；从未连接的服务在详情弹窗中不显示工具。
-- 服务注册/编辑留在 Nacos 控制台（`POST /v3/console/ai/mcp`）；本控制台只消费只读面。
+- 注册/注销写入走 Nacos 控制台管理 API（`POST|DELETE /v3/console/ai/mcp`），使用配置的控制台账号。
 
 <a id="dev-note"></a>
 ### 开发说明
