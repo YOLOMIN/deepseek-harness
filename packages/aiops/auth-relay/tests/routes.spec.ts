@@ -2,11 +2,12 @@ import { createServer } from 'node:http'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { LocalCredentialProvider } from '@deepseek-ai/dsh-credentials-local'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import { Config, apply, inject } from '../src/index.ts'
+import { parseExecActions } from '../src/index.ts'
 
 const cleanups: Array<() => Promise<unknown>> = []
 afterEach(async () => { while (cleanups.length) await cleanups.pop()!() })
@@ -84,4 +85,29 @@ it('redirects without a ticket cookie when the ticket parameter is absent or mal
   const cookies = response.headers.getSetCookie()
   expect(cookies.some(value => value.startsWith('pf_ticket='))).toBe(false)
   expect(cookies.some(value => value.startsWith('pf_tab=agents'))).toBe(true)
+})
+
+describe('parseExecActions', () => {
+  const NL = String.fromCharCode(10)
+  const fence = (body: string) => '```json exec_actions' + NL + body + NL + '```'
+  const fenceJson = (body: string) => '```json' + NL + body + NL + '```'
+
+  it('parses the persona-styled exec_actions fenced block', () => {
+    const plan = 'plan text' + NL + fence('[{"node":"kylinsec","cmd":"uptime","reason":"baseline"},{"node":"kylinsec","cmd":"df -h"}]')
+    const actions = parseExecActions(plan)
+    expect(actions).toHaveLength(2)
+    expect(actions[0]).toEqual({ node: 'kylinsec', cmd: 'uptime', reason: 'baseline' })
+    expect(actions[1]).toEqual({ node: 'kylinsec', cmd: 'df -h' })
+  })
+
+  it('accepts a bare fenced array and an exec_actions object form', () => {
+    expect(parseExecActions(fenceJson('[{"node":"n1","cmd":"uptime"}]'))).toHaveLength(1)
+    expect(parseExecActions(fenceJson('{"exec_actions":[{"node":"n1","cmd":"uptime"}]}'))).toHaveLength(1)
+  })
+
+  it('drops invalid entries and returns an empty list when no block exists', () => {
+    expect(parseExecActions('no fenced block')).toEqual([])
+    const actions = parseExecActions(fenceJson('[{"node":"","cmd":"x"},{"cmd":"y"},{"node":"n1","cmd":"uptime"}]'))
+    expect(actions).toEqual([{ node: 'n1', cmd: 'uptime' }])
+  })
 })

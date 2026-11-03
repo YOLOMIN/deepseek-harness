@@ -21,6 +21,10 @@ export interface Config {
   acpPatchPath: string
   /** Auto-answer policy for the Copilot agent's tool-permission prompts. */
   permission: CopilotPermission
+  /** Bearer token for the platform solutions API; empty disables the solution push. */
+  platformBearerToken: string
+  /** Solution push deadline in milliseconds; the platform host answers slowly under load. */
+  solutionPushTimeoutMs: number
   /** Upstream health-check deadline in milliseconds. */
   requestTimeoutMs: number
 }
@@ -33,6 +37,8 @@ export const Config = z.object({
   consoleTarget: z.string().pattern(/^https?:\/\/[^\s]+$/u).default('http://127.0.0.1:3080/'),
   acpPatchPath: z.string().min(1).default('aiops-headless.patch.yml'),
   permission: z.union(['allow', 'reject']).default('allow'),
+  platformBearerToken: z.string().default(''),
+  solutionPushTimeoutMs: z.number().min(1000).max(120_000).default(60_000),
   requestTimeoutMs: z.number().min(1).max(120_000).default(3_000),
 })
 
@@ -56,6 +62,57 @@ function json(res: ServerResponse, status: number, value: unknown): void {
 function text(res: ServerResponse, status: number, value: string): void {
   res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' })
   res.end(value)
+}
+
+/** One machine-actionable command extracted from the plan's exec_actions block. */
+interface ExecAction {
+  readonly node: string
+  readonly cmd: string
+  readonly reason?: string
+}
+
+/**
+ * Extract the exec_actions JSON block the Copilot persona appends to a plan.
+ * Accepts a fenced ```json block holding either a bare action array or an
+ * object with an `exec_actions` array; invalid entries are dropped, the list
+ * is capped at 20, and a missing block yields an empty list (plan-only push).
+ */
+export function parseExecActions(text: string): ExecAction[] {
+  // 围栏首行允许带 exec_actions 标记（persona 规约的 ```json exec_actions 形式）
+  const blocks = text.matchAll(/```[^\n]*\n([\s\S]*?)```/g)
+  for (const match of blocks) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(match[1] ?? '')
+    } catch {
+      continue
+    }
+    const list = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray((parsed as { exec_actions?: unknown }).exec_actions)
+        ? (parsed as { exec_actions: unknown[] }).exec_actions
+        : undefined
+    if (list === undefined) continue
+    return list.flatMap((entry): ExecAction[] => {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return []
+      const record = entry as { node?: unknown; cmd?: unknown; reason?: unknown }
+      if (typeof record.node !== 'string' || record.node.trim() === '') return []
+      if (typeof record.cmd !== 'string' || record.cmd.trim() === '') return []
+      return [{
+        node: record.node.trim(),
+        cmd: record.cmd.trim(),
+        ...(typeof record.reason === 'string' ? { reason: record.reason } : {}),
+      }]
+    }).slice(0, 20)
+  }
+  return []
+}
+
+/** Plan title: first markdown heading, else the question's first 40 chars. */
+function titleOf(question: string, plan: string): string {
+  const heading = /^#\s+(.+)$/m.exec(plan)?.[1]?.trim()
+  if (heading !== undefined && heading !== '') return heading.slice(0, 120)
+  return question.replace(/\s+/g, ' ').trim().slice(0, 40)
 }
 
 async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -90,6 +147,41 @@ export function apply(ctx: Context, config: Config): void {
     patchPath: config.acpPatchPath,
     permission: config.permission,
     resolveApiKey: async () => (await ctx.credentials.resolve(credentialRef('DEEPSEEK_API_KEY')))?.value,
+    onFinal: async ({ sessionId, message, text }) => {
+      if (config.platformBearerToken === '' || text.trim() === '') return undefined
+      const payload = {
+        title: titleOf(message, text),
+        question: message,
+        plan: text,
+        tools: parseExecActions(text),
+        source: 'dsh-copilot',
+        sessionId,
+      }
+      const response = await fetch(`${config.platformOrigin}/api/aiops/solutions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.platformBearerToken}`,
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(config.solutionPushTimeoutMs),
+      })
+      if (!response.ok) {
+        ctx.logger.warn(`aiops-auth-relay: solution push failed: HTTP ${response.status}`)
+        return { pushed: false, reason: `平台返回 HTTP ${response.status}` }
+      }
+      const result = await response.json() as { status?: number; data?: { id?: string; page?: string } }
+      if (result.status !== 0 || result.data?.id === undefined) {
+        ctx.logger.warn(`aiops-auth-relay: solution push rejected: ${JSON.stringify(result).slice(0, 200)}`)
+        return { pushed: false, reason: '平台拒绝接收方案' }
+      }
+      return {
+        pushed: true,
+        id: result.data.id,
+        page: `${config.platformOrigin}${result.data.page ?? `/aiops/solutions?id=${result.data.id}`}`,
+        actions: payload.tools.length,
+      }
+    },
   })
 
   const health = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {

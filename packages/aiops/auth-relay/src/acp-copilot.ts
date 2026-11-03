@@ -52,6 +52,16 @@ export interface AcpCopilotOptions {
   permission: CopilotPermission
   /** Resolves the model credential injected into the child's environment at spawn. */
   resolveApiKey: () => Promise<string | undefined>
+  /**
+   * Called once per completed prompt with the assembled answer; its return
+   * value is forwarded as an extra `solution` SSE frame (failures must be
+   * contained inside the hook — they never reject the prompt).
+   */
+  onFinal?: (input: {
+    readonly sessionId: string
+    readonly message: string
+    readonly text: string
+  }) => Promise<Record<string, unknown> | undefined>
   /** Test hook replacing the stdio connection factory, e.g. an in-process agent app. */
   connect?: (app: ClientApp, child: ChildProcess) => ClientConnection
   /** Test hook replacing the child-process spawn. */
@@ -236,6 +246,14 @@ export class AcpCopilotPool {
         sessionId,
         prompt: [{ type: 'text', text: message }],
       })
+      if (!signal.aborted && this.options.onFinal !== undefined) {
+        try {
+          const extra = await this.options.onFinal({ sessionId, message, text })
+          if (extra !== undefined) send({ event: 'solution', data: extra })
+        } catch {
+          // 方案推送失败不影响诊断答复本身
+        }
+      }
       if (!signal.aborted) send({ event: 'final', data: { text } })
     } finally {
       this.updateSinks.delete(sessionId)

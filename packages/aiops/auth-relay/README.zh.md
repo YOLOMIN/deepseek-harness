@@ -22,7 +22,7 @@ kind: "package-reference"
 
 在隔离 `webServer` 的 Cordis group 中，将 `@gac2/dsh-aiops-auth-relay` 与 `@deepseek-ai/dsh-host-webserver` 一起挂载。`aiops.patch.yml` 使用 `127.0.0.1:3081`，主 Web 应用继续使用 `3080`。
 
-配置项包括 `platformOrigin`（每次部署必填）、`dshRoot`、`sessionCwd`、`consoleTarget`、`acpPatchPath`、`permission`（智能体工具权限提示的自动应答策略）和 `requestTimeoutMs`，均由挂载它的 patch（如 `aiops.patch.yml`）设置。跳转令牌取自同进程 `connection` 服务，模型凭据通过 `ctx.credentials` 读取；平台口令、Cookie 和 MCP Token 不进入普通设置。
+配置项包括 `platformOrigin`（每次部署必填）、`dshRoot`、`sessionCwd`、`consoleTarget`、`acpPatchPath`、`permission`（智能体工具权限提示的自动应答策略）、`platformBearerToken`（Copilot 答复完成时把方案推送到平台 `/api/aiops/solutions`，空则关闭）、`solutionPushTimeoutMs` 和 `requestTimeoutMs`，均由挂载它的 patch（如 `aiops.patch.yml`）设置。跳转令牌取自同进程 `connection` 服务，模型凭据通过 `ctx.credentials` 读取；平台口令、Cookie 和 MCP Token 不进入普通设置。
 
 ## 模型体验
 

@@ -22,7 +22,7 @@ Mount the GAC2 operations integration on an isolated DSH `webServer`: console re
 
 Mount `@gac2/dsh-aiops-auth-relay` beside `@deepseek-ai/dsh-host-webserver` in a Cordis group that isolates `webServer`. `aiops.patch.yml` uses `127.0.0.1:3081`; the primary Web application continues on `3080`.
 
-Configuration fields are `platformOrigin` (required per deployment), `dshRoot`, `sessionCwd`, `consoleTarget`, `acpPatchPath`, `permission` (auto-answer policy for the agent's tool-permission prompts), and `requestTimeoutMs`, all set by the mounting patch such as `aiops.patch.yml`. The redirect token comes from the in-process `connection` service, and model credentials are read through `ctx.credentials`; platform passwords, cookies, and MCP tokens do not enter ordinary settings.
+Configuration fields are `platformOrigin` (required per deployment), `dshRoot`, `sessionCwd`, `consoleTarget`, `acpPatchPath`, `platformBearerToken` (push the finished Copilot plan to the platform `/api/aiops/solutions` for approval; empty disables), `solutionPushTimeoutMs`, `permission` (auto-answer policy for the agent's tool-permission prompts), and `requestTimeoutMs`, all set by the mounting patch such as `aiops.patch.yml`. The redirect token comes from the in-process `connection` service, and model credentials are read through `ctx.credentials`; platform passwords, cookies, and MCP tokens do not enter ordinary settings.
 
 ## Model Experience
 

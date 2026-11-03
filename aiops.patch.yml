@@ -23,6 +23,8 @@
             dshRoot: .
             sessionCwd: .
             consoleTarget: http://127.0.0.1:3080/
+            # Copilot 答复完成时把方案推送到平台 /api/aiops/solutions（人工审批闭环）
+            platformBearerToken: mcp_sysadm_testtoken123
 
     - id: aiops-console
       name: '@gac2/dsh-client-ui-aiops'

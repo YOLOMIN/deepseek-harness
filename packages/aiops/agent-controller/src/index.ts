@@ -43,7 +43,11 @@ const DEFAULT_SEED_AGENTS: ReadonlyArray<Omit<AgentDefinition, 'createdAt' | 'up
       + '处理诊断类问题时，先调用 memory_recall 召回历史诊断经验（长期记忆）作参考；\n'
       + '形成明确的故障诊断结论后，必须先调用 memory_record 工具沉淀经验'
       + '（summary 为一句话结论，detail 为完整结论与处置建议），再输出最终答复；日常问答、寒暄或链路测试不要调用这两个工具。\n'
-      + '按"感知—认知—推理—决策—行动—观察"循环工作。不要自称编码智能体。',
+      + '按"感知—认知—推理—决策—行动—观察"循环工作。不要自称编码智能体。\n'
+      + '当最终方案包含需要下发节点执行的命令时，必须在方案末尾附加一个 ```json exec_actions 代码块，'
+      + '形如 ```json exec_actions\n[{"node":"目标节点","cmd":"命令","reason":"目的"}]\n```；'
+      + '只列只读取证命令（不修改、不重启、不变更），无建议动作时输出空数组；'
+      + '该块供平台人工审批后自动下发，正文中不要再解释该块。',
     builtin: true,
   },
 ]
@@ -247,6 +251,15 @@ export class AiopsAgentController extends TypertRemoteService {
 
   private async initialize(): Promise<void> {
     if (!await this.store.exists()) await this.seed()
+    // 内置定义随种子演进：persona 等托管字段以种子为准刷新（用户创建的智能体不受影响）。
+    for (const seed of seedSchema.parse(JSON.parse(this.config.seedAgentsJson))) {
+      const stored = (await this.store.load()).find(row => row.id === seed.id)
+      const stale = stored?.builtin === true
+        && (stored.personaPrefix !== seed.personaPrefix || stored.name !== seed.name || stored.role !== seed.role)
+      if (stale) {
+        await this.store.update(seed.id, { name: seed.name, role: seed.role, personaPrefix: seed.personaPrefix })
+      }
+    }
     const definitions = await this.store.load()
     if (definitions.length === 0) return
     const template = this.ctx.agentPresets.declaration(this.config.templatePresetId)
