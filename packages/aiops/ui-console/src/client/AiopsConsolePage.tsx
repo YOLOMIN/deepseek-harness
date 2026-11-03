@@ -504,6 +504,7 @@ function SkillsTab({ face }: { face: AiopsSkillsFace }) {
   const [error, setError] = useState<string | null>(null)
   const [uninstalling, setUninstalling] = useState<AiopsSkillRow | null>(null)
   const [busyName, setBusyName] = useState<string | null>(null)
+  const [detailBusyName, setDetailBusyName] = useState<string | null>(null)
   const [detail, setDetail] = useState<AiopsSkillDetail | null>(null)
   const [settings, setSettings] = useState<AiopsSkillSettings | undefined>(undefined)
   const [switchSaving, setSwitchSaving] = useState(false)
@@ -599,14 +600,14 @@ function SkillsTab({ face }: { face: AiopsSkillsFace }) {
   }
 
   const openDetail = async (row: AiopsSkillRow) => {
-    if (busyName !== null) return
-    setBusyName(row.name)
+    if (detailBusyName !== null || busyName !== null) return
+    setDetailBusyName(row.name)
     try {
       setDetail(await face.getSkillDetail(row.name))
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
-      setBusyName(null)
+      setDetailBusyName(null)
     }
   }
 
@@ -667,7 +668,7 @@ function SkillsTab({ face }: { face: AiopsSkillsFace }) {
                 ]}
                 highlight={row.invocable}
                 actions={<span style={{ display: 'flex', gap: 6 }}>
-                  <Btn disabled={busyName === row.name} onClick={() => { void openDetail(row) }}>详情</Btn>
+                  <Btn disabled={busyName === row.name || detailBusyName === row.name} onClick={() => { void openDetail(row) }}>详情</Btn>
                   {row.installed
                     ? <Btn danger disabled={busyName === row.name} onClick={() => { setUninstalling(row) }}>卸载</Btn>
                     : <Btn primary disabled={busyName === row.name} onClick={() => { void install(row) }}>{busyName === row.name ? '安装中…' : '安装'}</Btn>}
@@ -1244,6 +1245,7 @@ function McpTab({ face }: { face: AiopsMcpFace }) {
   const [paging, setPaging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busyName, setBusyName] = useState<string | null>(null)
+  const [detailBusyName, setDetailBusyName] = useState<string | null>(null)
   const [detail, setDetail] = useState<AiopsMcpServerDetail | null>(null)
   const [settings, setSettings] = useState<AiopsMcpSettings | undefined>(undefined)
   const [switchSaving, setSwitchSaving] = useState(false)
@@ -1348,14 +1350,14 @@ function McpTab({ face }: { face: AiopsMcpFace }) {
   }
 
   const openDetail = async (row: AiopsMcpServerRow) => {
-    if (busyName !== null) return
-    setBusyName(row.name)
+    if (detailBusyName !== null || busyName !== null) return
+    setDetailBusyName(row.name)
     try {
       setDetail(await face.getServerDetail(row.name))
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
-      setBusyName(null)
+      setDetailBusyName(null)
     }
   }
 
@@ -1399,7 +1401,7 @@ function McpTab({ face }: { face: AiopsMcpFace }) {
                 ]}
                 highlight={row.connected}
                 actions={<span style={{ display: 'flex', gap: 6 }}>
-                  <Btn disabled={busyName === row.name} onClick={() => { void openDetail(row) }}>详情</Btn>
+                  <Btn disabled={busyName === row.name || detailBusyName === row.name} onClick={() => { void openDetail(row) }}>详情</Btn>
                   {row.connected
                     ? <Btn disabled={busyName === row.name} onClick={() => { void disconnect(row) }}>{busyName === row.name ? '断开中…' : '断开'}</Btn>
                     : <Btn primary disabled={busyName === row.name || !invokeOn} onClick={() => { void connect(row) }}>{busyName === row.name ? '连接中…' : '连接'}</Btn>}
