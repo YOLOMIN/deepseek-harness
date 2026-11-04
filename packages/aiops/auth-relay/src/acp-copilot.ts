@@ -8,6 +8,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { Readable as NodeReadable, Writable as NodeWritable } from 'node:stream'
 import { pathToFileURL } from 'node:url'
@@ -18,6 +19,8 @@ import {
   PROTOCOL_VERSION,
   type ClientApp,
   type ClientConnection,
+  type RequestPermissionRequest,
+  type RequestPermissionResponse,
   type SessionUpdate,
 } from '@agentclientprotocol/sdk'
 
@@ -38,7 +41,18 @@ export interface CopilotPrompt {
 }
 
 /** How the relay answers the agent's tool-permission prompts. */
-export type CopilotPermission = 'allow' | 'reject'
+export type CopilotPermission = 'allow' | 'reject' | 'ask'
+
+/** How long a held permission prompt waits for the human answer before cancelling it. */
+const PERMISSION_TIMEOUT_MS = 120_000
+
+/** One permission prompt held for a human decision through the relay route. */
+interface PendingPermission {
+  readonly resolve: (outcome: RequestPermissionResponse) => void
+  readonly timer: NodeJS.Timeout
+  /** Option to select when the human allows; undefined when the agent offered no allow choice. */
+  readonly allowOptionId: string | undefined
+}
 
 /** Process and deployment facts the pool needs to spawn and drive the ACP child. */
 export interface AcpCopilotOptions {
@@ -138,7 +152,11 @@ export class AcpCopilotPool {
   private starting: Promise<ClientConnection> | undefined
   private readonly liveSessions = new Set<string>()
   private readonly updateSinks = new Map<string, (update: SessionUpdate) => void>()
+  /** Per-session out-of-band SSE sinks (permission prompts are requests, not session updates). */
+  private readonly eventSinks = new Map<string, (frame: SseEvent) => void>()
   private readonly chains = new Map<string, Promise<void>>()
+  /** Permission prompts awaiting a human answer, keyed by relay-issued request id. */
+  private readonly pendingPermissions = new Map<string, PendingPermission>()
 
   private readonly options: AcpCopilotOptions
 
@@ -179,6 +197,12 @@ export class AcpCopilotPool {
 
   /** Stop the child and forget every session; in-flight prompts reject through the closed connection. */
   async dispose(): Promise<void> {
+    // 未决权限请求一并取消，避免智能体在拆除后仍等人工答复
+    for (const [, pending] of this.pendingPermissions) {
+      clearTimeout(pending.timer)
+      pending.resolve({ outcome: { outcome: 'cancelled' } })
+    }
+    this.pendingPermissions.clear()
     const child = this.child
     this.connection = undefined
     this.child = undefined
@@ -208,6 +232,8 @@ export class AcpCopilotPool {
       this.liveSessions.add(active)
     }
     send({ event: 'session', data: { sessionId: active } })
+    // 旁路事件槽随本条提示注册/回收，权限请求只投递给发起它的浏览器连接
+    this.eventSinks.set(active, send)
     const previous = this.chains.get(active) ?? Promise.resolve()
     const current = previous.then(() => this.runPrompt(active, message, send, signal, connection))
     const settled = current.catch(() => undefined)
@@ -216,7 +242,63 @@ export class AcpCopilotPool {
       await current
     } finally {
       if (this.chains.get(active) === settled) this.chains.delete(active)
+      if (this.eventSinks.get(active) === send) this.eventSinks.delete(active)
+      // 浏览器断开时挂起的权限请求兜底取消，避免智能体永远等待
+      for (const [requestId, pending] of this.pendingPermissions) {
+        if (signal.aborted) {
+          this.pendingPermissions.delete(requestId)
+          clearTimeout(pending.timer)
+          pending.resolve({ outcome: { outcome: 'cancelled' } })
+        }
+      }
     }
+  }
+
+  /**
+   * Hold one permission prompt until a human answers through the relay route,
+   * the browser disconnects, or the timeout cancels it. Emits a `permission`
+   * SSE frame carrying the request id and the tool-call summary.
+   */
+  private askPermission(sessionId: string, params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
+    const requestId = randomUUID()
+    const toolCall = params.toolCall
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingPermissions.delete(requestId)
+        resolve({ outcome: { outcome: 'cancelled' } })
+      }, PERMISSION_TIMEOUT_MS)
+      this.pendingPermissions.set(requestId, {
+        resolve,
+        timer,
+        allowOptionId: params.options.find(option => option.kind === 'allow_once' || option.kind === 'allow_always')?.optionId,
+      })
+      this.eventSinks.get(sessionId)?.({
+        event: 'permission',
+        data: {
+          requestId,
+          tool: typeof toolCall.title === 'string' ? toolCall.title : '工具调用',
+          kind: typeof toolCall.kind === 'string' ? toolCall.kind : '',
+          input: JSON.stringify(toolCall.rawInput ?? {}).slice(0, 2000),
+          options: params.options.map(option => ({ id: option.optionId, label: option.name })),
+        },
+      })
+    })
+  }
+
+  /**
+   * Answer one held permission prompt: `allow` selects the agent's allow-once
+   * option captured at hold time, otherwise the prompt is cancelled. Returns
+   * false when the request id is unknown or already settled.
+   */
+  respondPermission(requestId: string, allow: boolean): boolean {
+    const pending = this.pendingPermissions.get(requestId)
+    if (pending === undefined) return false
+    this.pendingPermissions.delete(requestId)
+    clearTimeout(pending.timer)
+    pending.resolve(allow && pending.allowOptionId !== undefined
+      ? { outcome: { outcome: 'selected', optionId: pending.allowOptionId } }
+      : { outcome: { outcome: 'cancelled' } })
+    return true
   }
 
   private async runPrompt(
@@ -287,6 +369,8 @@ export class AcpCopilotPool {
         this.updateSinks.get(params.sessionId)?.(params.update)
       })
       .onRequest(methods.client.session.requestPermission, ({ params }) => {
+        // ask 策略：挂起请求，转成 permission SSE 事件推到 Copilot 面板，由人工点选后回填
+        if (this.options.permission === 'ask') return this.askPermission(params.sessionId, params)
         if (this.options.permission === 'allow') {
           const allow = params.options.find(option => option.kind === 'allow_once' || option.kind === 'allow_always')
           if (allow !== undefined) return { outcome: { outcome: 'selected' as const, optionId: allow.optionId } }

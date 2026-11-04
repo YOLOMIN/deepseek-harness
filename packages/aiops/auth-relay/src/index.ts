@@ -19,7 +19,7 @@ export interface Config {
   consoleTarget: string
   /** Persona/identity patch applied to the acp profile, resolved against dshRoot. */
   acpPatchPath: string
-  /** Auto-answer policy for the Copilot agent's tool-permission prompts. */
+  /** Auto-answer policy for the Copilot agent's tool-permission prompts: ask 转成人工确认事件。 */
   permission: CopilotPermission
   /** Bearer token for the platform solutions API; empty disables the solution push. */
   platformBearerToken: string
@@ -36,7 +36,7 @@ export const Config = z.object({
   sessionCwd: z.string().min(1).default(process.cwd()),
   consoleTarget: z.string().pattern(/^https?:\/\/[^\s]+$/u).default('http://127.0.0.1:3080/'),
   acpPatchPath: z.string().min(1).default('aiops-headless.patch.yml'),
-  permission: z.union(['allow', 'reject']).default('allow'),
+  permission: z.union(['allow', 'reject', 'ask']).default('allow'),
   platformBearerToken: z.string().default(''),
   solutionPushTimeoutMs: z.number().min(1000).max(120_000).default(60_000),
   requestTimeoutMs: z.number().min(1).max(120_000).default(3_000),
@@ -236,10 +236,20 @@ export function apply(ctx: Context, config: Config): void {
     if (!res.writableEnded) res.end()
   }
 
+  // 人工权限应答：Copilot 面板对 permission 事件点选「允许/拒绝」后回填给挂起的智能体
+  const permissionAnswer = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const payload = await body(req)
+    const requestId = typeof payload.requestId === 'string' ? payload.requestId : ''
+    if (requestId === '') throw new Error('缺少 requestId')
+    const answered = copilot.respondPermission(requestId, payload.allow === true)
+    json(res, 200, { status: answered ? 0 : 1, msg: answered ? 'success' : '权限请求不存在或已超时' })
+  }
+
   const routes: Array<{ path: string; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void }> = [
     { path: '/health', handler: health },
     { path: '/console', handler: consoleEntry },
     { path: '/api/aiops/chat', handler: chat },
+    { path: '/api/aiops/permission', handler: permissionAnswer },
   ]
   for (const route of routes) {
     ctx.effect(() => ctx.webServer.register({
