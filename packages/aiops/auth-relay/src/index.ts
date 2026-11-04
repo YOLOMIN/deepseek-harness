@@ -147,6 +147,9 @@ export function apply(ctx: Context, config: Config): void {
     patchPath: config.acpPatchPath,
     permission: config.permission,
     resolveApiKey: async () => (await ctx.credentials.resolve(credentialRef('DEEPSEEK_API_KEY')))?.value,
+    // 方案闭环钩子：Copilot 答复完成时把方案推送到平台审批。
+    // 返回的 data 以 solution SSE 事件发给平台 Copilot 面板（渲染"去审批并下发"操作卡）；
+    // 推送失败只回传 pushed:false，绝不影响诊断答复本身。
     onFinal: async ({ sessionId, message, text }) => {
       if (config.platformBearerToken === '' || text.trim() === '') return undefined
       const payload = {
