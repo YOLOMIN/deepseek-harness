@@ -16,7 +16,7 @@ The **standalone plugin** for SCMMS platform integration (split out of the aiops
 - the Copilot SSE diagnosis channel (a persistent ACP child `dsh --profile acp`; every browser conversation is a standard ACP session);
 - operation-level human confirmation (with `permission: ask`, permission prompts are held and forwarded as SSE events, answered through `POST /api/aiops/permission`) and the solution push closed loop (on completion, the plan with its `exec_actions` block is pushed to the platform `/api/aiops/solutions`).
 
-Platform account integration consumes the platform's standard `/api/aiops/*` endpoints; the platform-side companion code (solution closed-loop in Go and the Copilot frontend component) lives in `platform/scmms/` at the repository root.
+Platform account integration consumes the platform's standard `/api/aiops/*` endpoints; the platform-side companion implementation (solution closed-loop and the Copilot frontend component) is maintained in the operations platform repository (`router/aiops/` and `ks-scmms-ui`); this repository carries only the DSH-side integration plugin.
 
 ## Table of Contents
 

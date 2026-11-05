@@ -16,7 +16,7 @@ kind: "package-reference"
 - Copilot SSE 流式诊断通道（常驻 ACP 子进程 `dsh --profile acp`，浏览器会话即标准 ACP 会话）；
 - 操作级人工确认（`permission: ask` 时权限请求挂起转 SSE 事件，`POST /api/aiops/permission` 回填）与方案推送闭环（答复完成时把方案与 `exec_actions` 动作块推送到平台 `/api/aiops/solutions`）。
 
-平台账户体系对接直接使用平台标准 `/api/aiops/*` 接口；平台侧配套适配代码（方案闭环 Go 实现与 Copilot 前端组件）见仓库根目录 `platform/scmms/`。
+平台账户体系对接直接使用平台标准 `/api/aiops/*` 接口；平台侧配套实现（方案闭环与 Copilot 前端组件）随高性能集群监控平台仓库维护（`router/aiops/` 与 `ks-scmms-ui`），本仓库只保留 DSH 对接插件。
 
 ## 目录
 
