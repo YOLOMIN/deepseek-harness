@@ -294,7 +294,51 @@ export function apply(ctx: Context, config: Config): void {
     json(res, 200, { status: 0, msg: 'success', data: { mode: copilot.currentMode() } })
   }
 
-  const routes: Array<{ path: string; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void }> = [
+  // 方案审批代理：面板在会话内直接批准/驳回/读执行结果，中继附带 Bearer 口令转发平台
+  //（浏览器不持有平台对接口令，统一由中继代理，不下跳新窗口）
+  const solutionProxy = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    if (config.platformBearerToken === '') {
+      json(res, 200, { status: 1, msg: '未配置平台对接口令（platformBearerToken）' })
+      return
+    }
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+    // 允许的中继路径：/api/aiops/solutions/<id>/approve|reject（POST）与 /executions（GET）
+    const m = /^\/api\/aiops\/solutions\/([A-Za-z0-9-]{8,64})\/(approve|reject|executions)$/.exec(url.pathname)
+    if (m === null) {
+      json(res, 200, { status: 1, msg: '不支持的方案操作' })
+      return
+    }
+    const [, id, action] = m
+    const upstreamPath = `${config.solutionsPath}/${id}/${action}`
+    let upstream: Response
+    try {
+      if (action === 'executions') {
+        upstream = await fetch(`${config.platformOrigin}${upstreamPath}`, {
+          headers: { Authorization: `Bearer ${config.platformBearerToken}` },
+          signal: AbortSignal.timeout(config.solutionPushTimeoutMs),
+        })
+      } else {
+        const payload = await body(req)
+        upstream = await fetch(`${config.platformOrigin}${upstreamPath}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${config.platformBearerToken}`,
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(config.solutionPushTimeoutMs),
+        })
+      }
+    } catch (error: unknown) {
+      json(res, 200, { status: 1, msg: `平台不可达：${error instanceof Error ? error.message : String(error)}` })
+      return
+    }
+    const payload: unknown = await upstream.json().catch(() => undefined)
+    json(res, 200, payload ?? { status: 1, msg: `平台返回 HTTP ${upstream.status}` })
+  }
+
+  // webServer 路由注册：静态路径 exact，方案代理按前缀挂载（含 :id/action 动态段）
+  const routes: Array<{ path: string; kind?: 'exact' | 'prefix'; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void }> = [
     { path: '/health', handler: health },
     { path: '/console', handler: consoleEntry },
     { path: '/api/aiops/chat', handler: chat },
@@ -302,10 +346,11 @@ export function apply(ctx: Context, config: Config): void {
     { path: '/api/aiops/cancel', handler: cancel },
     { path: '/api/aiops/sessions', handler: sessions },
     { path: '/api/aiops/mode', handler: mode },
+    { path: '/api/aiops/solutions', kind: 'prefix', handler: solutionProxy },
   ]
   for (const route of routes) {
     ctx.effect(() => ctx.webServer.register({
-      kind: 'exact', path: route.path,
+      kind: route.kind ?? 'exact', path: route.path,
       handler: (req, res) => {
         cors(res)
         if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return }

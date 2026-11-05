@@ -177,6 +177,8 @@ export class AcpCopilotPool {
   private readonly chains = new Map<string, Promise<void>>()
   /** Permission prompts awaiting a human answer, keyed by relay-issued request id. */
   private readonly pendingPermissions = new Map<string, PendingPermission>()
+  /** Sessions cancelled by the user; further deltas are dropped and the solution push is skipped. */
+  private readonly cancelledSessions = new Set<string>()
   /** Conversation ledger for the history endpoint, keyed by session id. */
   private readonly sessionInfos = new Map<string, CopilotSessionInfo>()
   /** The sandbox mode the current child was spawned with. */
@@ -227,6 +229,9 @@ export class AcpCopilotPool {
    */
   async cancelSession(sessionId: string): Promise<boolean> {
     if (this.connection === undefined || !this.liveSessions.has(sessionId)) return false
+    // 先标记再取消：取消后的增量与方案推送都被丢弃，界面上该轮即「已停止」
+    this.cancelledSessions.add(sessionId)
+    this.eventSinks.get(sessionId)?.({ event: 'status', data: { cancelled: true, message: '已停止' } })
     await this.connection.agent.notify(methods.agent.session.cancel, { sessionId })
     return true
   }
@@ -298,10 +303,12 @@ export class AcpCopilotPool {
     if (active === undefined) {
       active = sessionIdOf(await agent.request(methods.agent.session.new, { cwd: this.options.sessionCwd, mcpServers: [] }))
       this.liveSessions.add(active)
-      // 新会话登记台账：标题取首条用户消息（截断），供历史会话列表展示
+      // 新会话登记台账：标题取首条用户消息（截断）；编码损坏（替换符占比高）给可读占位
+      const title = message.replace(/\s+/g, ' ').trim().slice(0, 60)
+      const replacementChars = (title.match(/�/g) ?? []).length
       this.sessionInfos.set(active, {
         id: active,
-        title: message.replace(/\s+/g, ' ').trim().slice(0, 60),
+        title: replacementChars >= 3 ? '（未命名会话）' : title === '' ? '（未命名会话）' : title,
         createdAt: Date.now(),
         lastActiveAt: Date.now(),
       })
@@ -310,6 +317,8 @@ export class AcpCopilotPool {
       if (info !== undefined) this.sessionInfos.set(active, { ...info, lastActiveAt: Date.now() })
     }
     send({ event: 'session', data: { sessionId: active } })
+    // 新一轮提示恢复投递：上一轮的停止标记只作用于该轮
+    this.cancelledSessions.delete(active)
     // 旁路事件槽随本条提示注册/回收，权限请求只投递给发起它的浏览器连接
     this.eventSinks.set(active, send)
     const previous = this.chains.get(active) ?? Promise.resolve()
@@ -389,6 +398,8 @@ export class AcpCopilotPool {
     const agent = connection.agent
     let text = ''
     this.updateSinks.set(sessionId, (update) => {
+      // 已取消的会话丢弃后续增量：界面上「停止」后不再有任何内容继续回传
+      if (this.cancelledSessions.has(sessionId)) return
       const frame = sessionUpdateToSse(update)
       if (frame === undefined) return
       if (frame.event === 'delta' && frame.data.kind === 'text' && typeof frame.data.text === 'string') {
@@ -406,7 +417,9 @@ export class AcpCopilotPool {
         sessionId,
         prompt: [{ type: 'text', text: message }],
       })
-      if (!signal.aborted && this.options.onFinal !== undefined) {
+      // 用户停止的轮次不推送方案（半成品方案不该进入审批）
+      const cancelled = this.cancelledSessions.has(sessionId)
+      if (!signal.aborted && !cancelled && this.options.onFinal !== undefined) {
         try {
           const extra = await this.options.onFinal({ sessionId, message, text })
           if (extra !== undefined) send({ event: 'solution', data: extra })
@@ -414,7 +427,7 @@ export class AcpCopilotPool {
           // 方案推送失败不影响诊断答复本身
         }
       }
-      if (!signal.aborted) send({ event: 'final', data: { text } })
+      if (!signal.aborted && !cancelled) send({ event: 'final', data: { text } })
     } finally {
       this.updateSinks.delete(sessionId)
       signal.removeEventListener('abort', onAbort)
