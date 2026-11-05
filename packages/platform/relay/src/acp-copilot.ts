@@ -38,6 +38,11 @@ export interface CopilotPrompt {
   message: string
   /** ACP session id returned by an earlier `session` frame, for conversation continuity. */
   sessionId?: string
+  /**
+   * Per-message sandbox override: switching modes respawns the ACP child
+   * (refused while a turn is in flight). Omit to keep the current mode.
+   */
+  sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access'
 }
 
 /** How the relay answers the agent's tool-permission prompts. */
@@ -147,6 +152,15 @@ function connectStdio(clientApp: ClientApp, child: ChildProcess): ClientConnecti
   ))
 }
 
+/** One tracked Copilot conversation for the history list. */
+export interface CopilotSessionInfo {
+  readonly id: string
+  /** First user message, truncated for display. */
+  readonly title: string
+  readonly createdAt: number
+  readonly lastActiveAt: number
+}
+
 /**
  * Owns the ACP Copilot subprocess and routes prompts to per-conversation sessions.
  * Sessions live inside the child; a child crash drops the session set and the next
@@ -163,6 +177,10 @@ export class AcpCopilotPool {
   private readonly chains = new Map<string, Promise<void>>()
   /** Permission prompts awaiting a human answer, keyed by relay-issued request id. */
   private readonly pendingPermissions = new Map<string, PendingPermission>()
+  /** Conversation ledger for the history endpoint, keyed by session id. */
+  private readonly sessionInfos = new Map<string, CopilotSessionInfo>()
+  /** The sandbox mode the current child was spawned with. */
+  private spawnedMode: string
 
   private readonly options: AcpCopilotOptions
 
@@ -172,6 +190,45 @@ export class AcpCopilotPool {
    */
   constructor(options: AcpCopilotOptions) {
     this.options = { ...options, dshRoot: resolve(options.dshRoot), sessionCwd: resolve(options.sessionCwd) }
+    this.spawnedMode = options.sandboxMode
+  }
+
+  /** Conversation ledger for the history list, most recently active first. */
+  sessions(): CopilotSessionInfo[] {
+    return [...this.sessionInfos.values()].sort((a, b) => b.lastActiveAt - a.lastActiveAt)
+  }
+
+  /** The sandbox mode the current child enforces (respawned mode or the configured default). */
+  currentMode(): string {
+    return this.spawnedMode
+  }
+
+  /**
+   * Switch the Copilot sandbox mode by respawning the child with the new
+   * `DSH_PERMISSION_MODE`. Sessions are child-scoped and do not survive the
+   * respawn; refuse while any prompt is in flight so a running turn is never
+   * killed by a mode flip.
+   * @returns true when the child was respawned with the new mode.
+   */
+  async setMode(mode: 'read-only' | 'workspace-write' | 'danger-full-access'): Promise<boolean> {
+    if (mode === this.spawnedMode) return false
+    if (this.chains.size > 0) return false
+    this.options.sandboxMode = mode
+    this.spawnedMode = mode
+    this.liveSessions.clear()
+    this.sessionInfos.clear()
+    await this.dispose()
+    return true
+  }
+
+  /**
+   * Cancel the running turn of one session (ACP session/cancel).
+   * @returns false when no live connection/session exists.
+   */
+  async cancelSession(sessionId: string): Promise<boolean> {
+    if (this.connection === undefined || !this.liveSessions.has(sessionId)) return false
+    await this.connection.agent.notify(methods.agent.session.cancel, { sessionId })
+    return true
   }
 
   /**
@@ -182,6 +239,11 @@ export class AcpCopilotPool {
    * @param signal - client-disconnect signal; aborting cancels the in-flight ACP prompt.
    */
   async prompt(input: CopilotPrompt, send: (frame: SseEvent) => void, signal: AbortSignal): Promise<void> {
+    // 每条消息可携带沙箱档位：与当前子进程档位不同则热重建（会话上下文随旧子进程结束）
+    if (input.sandboxMode !== undefined) {
+      const switched = await this.setMode(input.sandboxMode)
+      if (switched) send({ event: 'status', data: { message: `沙箱档位已切换为 ${input.sandboxMode}（智能体上下文已重置）` } })
+    }
     const reused = input.sessionId !== undefined && this.liveSessions.has(input.sessionId)
       ? input.sessionId
       : undefined
@@ -236,6 +298,16 @@ export class AcpCopilotPool {
     if (active === undefined) {
       active = sessionIdOf(await agent.request(methods.agent.session.new, { cwd: this.options.sessionCwd, mcpServers: [] }))
       this.liveSessions.add(active)
+      // 新会话登记台账：标题取首条用户消息（截断），供历史会话列表展示
+      this.sessionInfos.set(active, {
+        id: active,
+        title: message.replace(/\s+/g, ' ').trim().slice(0, 60),
+        createdAt: Date.now(),
+        lastActiveAt: Date.now(),
+      })
+    } else {
+      const info = this.sessionInfos.get(active)
+      if (info !== undefined) this.sessionInfos.set(active, { ...info, lastActiveAt: Date.now() })
     }
     send({ event: 'session', data: { sessionId: active } })
     // 旁路事件槽随本条提示注册/回收，权限请求只投递给发起它的浏览器连接

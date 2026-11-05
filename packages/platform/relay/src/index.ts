@@ -234,6 +234,10 @@ export function apply(ctx: Context, config: Config): void {
     }
   }
 
+  /** Copilot 可切换的沙箱档位（与 DSH 输入框档位语义一致）。 */
+  const SANDBOX_MODES = ['read-only', 'workspace-write', 'danger-full-access'] as const
+  type SandboxModeChoice = (typeof SANDBOX_MODES)[number]
+
   const chat = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const payload = await body(req)
     const message = typeof payload.message === 'string' ? payload.message.trim() : ''
@@ -249,7 +253,16 @@ export function apply(ctx: Context, config: Config): void {
     const ac = new AbortController()
     res.on('close', () => { ac.abort() })
     const sessionId = typeof payload.sessionId === 'string' && payload.sessionId !== '' ? payload.sessionId : undefined
-    await copilot.prompt(sessionId === undefined ? { message } : { message, sessionId }, send, ac.signal)
+    // 每条消息可携带沙箱档位（输入框档位选择）；与当前子进程档位不同则热重建
+    const sandboxMode = SANDBOX_MODES.includes(payload.sandboxMode as SandboxModeChoice)
+      ? payload.sandboxMode as SandboxModeChoice
+      : undefined
+    const prompt = {
+      message,
+      ...(sessionId === undefined ? {} : { sessionId }),
+      ...(sandboxMode === undefined ? {} : { sandboxMode }),
+    }
+    await copilot.prompt(prompt, send, ac.signal)
     if (!res.writableEnded) res.end()
   }
 
@@ -262,11 +275,33 @@ export function apply(ctx: Context, config: Config): void {
     json(res, 200, { status: answered ? 0 : 1, msg: answered ? 'success' : '权限请求不存在或已超时' })
   }
 
+  // 打断：取消指定会话正在进行的诊断轮次（ACP session/cancel）
+  const cancel = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const payload = await body(req)
+    const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : ''
+    if (sessionId === '') throw new Error('缺少 sessionId')
+    const cancelled = await copilot.cancelSession(sessionId)
+    json(res, 200, { status: cancelled ? 0 : 1, msg: cancelled ? 'success' : '会话不存在或已结束' })
+  }
+
+  // 历史会话台账：标题取首条用户消息，按最近活跃排序
+  const sessions = (_req: IncomingMessage, res: ServerResponse): void => {
+    json(res, 200, { status: 0, msg: 'success', data: copilot.sessions() })
+  }
+
+  // 当前沙箱档位（输入框档位选择器的回显）
+  const mode = (_req: IncomingMessage, res: ServerResponse): void => {
+    json(res, 200, { status: 0, msg: 'success', data: { mode: copilot.currentMode() } })
+  }
+
   const routes: Array<{ path: string; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void }> = [
     { path: '/health', handler: health },
     { path: '/console', handler: consoleEntry },
     { path: '/api/aiops/chat', handler: chat },
     { path: '/api/aiops/permission', handler: permissionAnswer },
+    { path: '/api/aiops/cancel', handler: cancel },
+    { path: '/api/aiops/sessions', handler: sessions },
+    { path: '/api/aiops/mode', handler: mode },
   ]
   for (const route of routes) {
     ctx.effect(() => ctx.webServer.register({
