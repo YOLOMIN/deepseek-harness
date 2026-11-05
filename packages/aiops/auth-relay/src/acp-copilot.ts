@@ -64,6 +64,12 @@ export interface AcpCopilotOptions {
   patchPath: string
   /** Auto-answer policy for the agent's permission prompts. */
   permission: CopilotPermission
+  /**
+   * Sandbox mode injected into the ACP child (`DSH_PERMISSION_MODE`):
+   * `read-only` 让写操作一律走沙箱升级审批（配合 permission: ask 形成人工确认）；
+   * `workspace-write`/`danger-full-access` 逐级放宽。
+   */
+  sandboxMode: 'read-only' | 'workspace-write' | 'danger-full-access'
   /** Resolves the model credential injected into the child's environment at spawn. */
   resolveApiKey: () => Promise<string | undefined>
   /**
@@ -278,7 +284,7 @@ export class AcpCopilotPool {
           requestId,
           tool: typeof toolCall.title === 'string' ? toolCall.title : '工具调用',
           kind: typeof toolCall.kind === 'string' ? toolCall.kind : '',
-          input: JSON.stringify(toolCall.rawInput ?? {}).slice(0, 2000),
+          ...(toolCall.rawInput === undefined ? {} : { input: JSON.stringify(toolCall.rawInput).slice(0, 2000) }),
           options: params.options.map(option => ({ id: option.optionId, label: option.name })),
         },
       })
@@ -357,6 +363,8 @@ export class AcpCopilotPool {
   private async start(): Promise<ClientConnection> {
     const { dshRoot, patchPath } = this.options
     const env: NodeJS.ProcessEnv = { ...process.env, TSX_TSCONFIG_PATH: join(dshRoot, 'tsconfig.base.json') }
+    // 沙箱模式注入子进程：read-only 下写操作触发沙箱升级审批（经 ask 策略转成人工确认）
+    env.DSH_PERMISSION_MODE = this.options.sandboxMode
     const apiKey = await this.options.resolveApiKey()
     if (apiKey !== undefined) env.DEEPSEEK_API_KEY = apiKey
     const child = (this.options.spawnChild ?? ((childEnv: NodeJS.ProcessEnv) => spawn(process.execPath, [

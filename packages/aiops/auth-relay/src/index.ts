@@ -21,6 +21,8 @@ export interface Config {
   acpPatchPath: string
   /** Auto-answer policy for the Copilot agent's tool-permission prompts: ask 转成人工确认事件。 */
   permission: CopilotPermission
+  /** Copilot 会话的沙箱模式：read-only 时写操作需人工确认后沙箱升级执行。 */
+  sandboxMode: 'read-only' | 'workspace-write' | 'danger-full-access'
   /** Bearer token for the platform solutions API; empty disables the solution push. */
   platformBearerToken: string
   /** Solution push deadline in milliseconds; the platform host answers slowly under load. */
@@ -37,6 +39,7 @@ export const Config = z.object({
   consoleTarget: z.string().pattern(/^https?:\/\/[^\s]+$/u).default('http://127.0.0.1:3080/'),
   acpPatchPath: z.string().min(1).default('aiops-headless.patch.yml'),
   permission: z.union(['allow', 'reject', 'ask']).default('allow'),
+  sandboxMode: z.union(['read-only', 'workspace-write', 'danger-full-access']).default('workspace-write'),
   platformBearerToken: z.string().default(''),
   solutionPushTimeoutMs: z.number().min(1000).max(120_000).default(60_000),
   requestTimeoutMs: z.number().min(1).max(120_000).default(3_000),
@@ -146,6 +149,7 @@ export function apply(ctx: Context, config: Config): void {
     sessionCwd: config.sessionCwd,
     patchPath: config.acpPatchPath,
     permission: config.permission,
+    sandboxMode: config.sandboxMode,
     resolveApiKey: async () => (await ctx.credentials.resolve(credentialRef('DEEPSEEK_API_KEY')))?.value,
     // 方案闭环钩子：Copilot 答复完成时把方案推送到平台审批。
     // 返回的 data 以 solution SSE 事件发给平台 Copilot 面板（渲染"去审批并下发"操作卡）；

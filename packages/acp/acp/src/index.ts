@@ -169,9 +169,10 @@ export function apply(ctx: Context, config: AcpConfig): void {
     if (record === undefined || request.callId === undefined) return next()
     const callId = request.callId
     return record.drainUpdates().then(() => {
+      // GAC2：透传工具名与发起方理由，人工确认界面才能显示"谁在申请什么"
       const params: RequestPermissionRequest = {
         sessionId: record.agent.session.id,
-        toolCall: { toolCallId: callId },
+        toolCall: { toolCallId: callId, title: request.reason ?? request.toolName },
         options: [
           { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
           { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' },

@@ -26,6 +26,8 @@
             # 权限策略 ask：智能体工具调用权限请求挂起并转成 SSE 事件，
             # 由 Copilot 面板人工点选后回填（allow 为自动放行、reject 为自动拒绝）
             permission: ask
+            # 沙箱收紧为只读：写操作必须经人工批准后沙箱升级执行（配合 ask 形成人在环上）
+            sandboxMode: read-only
             # Copilot 答复完成时把方案推送到平台 /api/aiops/solutions（人工审批闭环）
             platformBearerToken: mcp_sysadm_testtoken123
 
