@@ -1,11 +1,11 @@
 /**
  * 智能运维控制台页面：智能体管理 / RAG 管理 / skills 管理 / 日志管理 / 记忆管理 / MCP 接口管理
  * 六个模块页签。RAG / skills / MCP 以市场式卡片网格展示管理对象，清单分页展示；
- * 每个功能卡片标注功能属性（管理功能 / 运行时能力），原型数据，样式随 dsh 主题变量。
+ * 每个功能卡片标注功能属性（管理功能 / 运行时能力），样式随 dsh 主题变量。
  * 控制台按登录账户权限过滤可见资源：普通账户仅见所对接系统的智能体与资源，管理员可见全部。
  * 会话管理直接复用 dsh 既有会话功能，不在控制台重复建设。
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import css from './AiopsConsolePage.module.css'
 import { consumeInitialTab } from './initial-tab.ts'
 import type { AiopsAgentsFace } from './agents-face.ts'
@@ -13,6 +13,7 @@ import type { AiopsLogsFace } from './logs-face.ts'
 import type { AiopsMemoryFace } from './memory-face.ts'
 import type { AiopsSkillsFace } from './skills-face.ts'
 import type { AiopsMcpFace } from './mcp-face.ts'
+import type { AiopsRagFace } from './rag-face.ts'
 import type { AiopsAgentRow } from '@gac2/dsh-aiops-agent-controller/types'
 import type { AiopsLogKind, AiopsLogLevel, AiopsLogPage, AiopsLogRow } from '@gac2/dsh-aiops-log-controller/types'
 import type { AiopsMemoryDetail, AiopsMemoryKind, AiopsMemoryPage, AiopsMemoryRow, AiopsRecallConfig } from '@gac2/dsh-aiops-memory-controller/types'
@@ -22,6 +23,9 @@ import type {
 import type {
   AiopsMcpRegisterInput, AiopsMcpServerDetail, AiopsMcpServerPage, AiopsMcpServerRow, AiopsMcpSettings,
 } from '@gac2/dsh-aiops-mcp-controller/types'
+import type {
+  AiopsRagBase, AiopsRagBasePage, AiopsRagChunkPage, AiopsRagDocumentPage, AiopsRagDocumentRow, AiopsRagModelOption, AiopsRagSearchHit,
+} from '@gac2/dsh-aiops-rag-controller/types'
 import type { AiopsLocaleKey } from './locales.ts'
 import {
   IconDatabaseOutlineRegular,
@@ -47,12 +51,6 @@ const V = {
   radius: 'var(--dsw-radius-md,8px)',
   mono: 'var(--dsw-font-mono,monospace)',
 } as const
-
-type Role = 'admin' | 'hpc' | 'os'
-type Scope = 'hpc' | 'os' | 'shared'
-
-/** 资源可见性：管理员可见全部；普通账户可见共享资源与所对接系统的资源。 */
-const vis = (scope: Scope, role: Role) => role === 'admin' || scope === 'shared' || scope === role
 
 const card: Record<string, string | number> = {
   background: V.bg, border: `1px solid ${V.border}`, borderRadius: V.radius, padding: '12px 16px',
@@ -433,60 +431,483 @@ function AgentsTab({ face }: { face: AiopsAgentsFace }) {
   )
 }
 
-/* ---------- RAG 管理（知识库查询 / 创建 / 编辑 / 删除，分页；按账户权限过滤） ---------- */
-function RagTab({ role }: { role: Role }) {
+/* ---------- RAG 管理（KBMatrix 知识库：清单/创建/删除 + 文档上传/删除 + 分块浏览 + 检索测试） ---------- */
+const RAG_PAGE_SIZE = 6
+const DOC_PAGE_SIZE = 8
+const CHUNK_PAGE_SIZE = 6
+/** 上传体积上限：wire 以 base64 传输，控制台面向运维文档（Markdown/小 PDF）。 */
+const UPLOAD_MAX_BYTES = 20 * 1024 * 1024
+
+/** 字节数人类可读。 */
+function formatBytes(n: number): string {
+  if (n >= 1048576) return `${(n / 1048576).toFixed(1)} MB`
+  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${n} B`
+}
+
+function RagTab({ face }: { face: AiopsRagFace }) {
+  const [keyword, setKeyword] = useState('')
+  const [page, setPage] = useState(1)
+  const [data, setData] = useState<AiopsRagBasePage | undefined>(undefined)
+  const [querying, setQuerying] = useState(false)
+  const [paging, setPaging] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [draft, setDraft] = useState({ name: '', description: '', modelId: '' })
+  const [models, setModels] = useState<readonly AiopsRagModelOption[]>([])
+  const [saving, setSaving] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const [removing, setRemoving] = useState<AiopsRagBase | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [activeKb, setActiveKb] = useState<AiopsRagBase | null>(null)
+  const [docs, setDocs] = useState<AiopsRagDocumentPage | undefined>(undefined)
+  const [docPage, setDocPage] = useState(1)
+  const [docsBusy, setDocsBusy] = useState(false)
+  const [docsError, setDocsError] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [docBusyId, setDocBusyId] = useState<string | null>(null)
+  const uploadInputRef = useRef<HTMLInputElement | null>(null)
+  const [activeDoc, setActiveDoc] = useState<AiopsRagDocumentRow | null>(null)
+  const [chunks, setChunks] = useState<AiopsRagChunkPage | undefined>(undefined)
+  const [chunkPage, setChunkPage] = useState(1)
+  const [chunksBusy, setChunksBusy] = useState(false)
+  const [chunksError, setChunksError] = useState<string | null>(null)
+  const [searchKbId, setSearchKbId] = useState('')
+  const [searchText, setSearchText] = useState('')
+  const [searching, setSearching] = useState(false)
+  const [hits, setHits] = useState<readonly AiopsRagSearchHit[] | undefined>(undefined)
+  const [searchError, setSearchError] = useState<string | null>(null)
   const [inject, setInject] = useState(true)
-  const kbs = [
-    { scope: 'hpc' as Scope, card: (
-      <ItemCard
-        icon="运" iconColor="#5b6ee1" name="HPC 运维手册" meta="kb-hpc-manual"
-        desc="集群运维标准手册：节点巡检、IB 链路、GPU 温度、存储挂载等标准处置流程与阈值规范。"
-        tags={[{ color: V.text3, text: '条目 126' }, { color: V.success, text: '索引最新' }]}
-        source="更新于 2026-10-12"
-        actions={<span style={{ display: 'flex', gap: 6 }}><Btn>编辑</Btn><Btn>删除</Btn></span>}
-        highlight
-      />
-    ) },
-    { scope: 'shared' as Scope, card: (
-      <ItemCard
-        icon="经" iconColor="#2ea44f" name="运维经验沉淀" meta="kb-ops-exp"
-        desc="历史诊断结论与处置经验沉淀：由记忆管理模块经评估晋升写入，支撑同类故障的经验复用。"
-        tags={[{ color: V.text3, text: '条目 58' }, { color: V.success, text: '索引最新' }]}
-        source="更新于 2026-10-08"
-        actions={<span style={{ display: 'flex', gap: 6 }}><Btn>编辑</Btn><Btn>删除</Btn></span>}
-      />
-    ) },
-    { scope: 'os' as Scope, card: (
-      <ItemCard
-        icon="规" iconColor="#b26a00" name="硬件运维规范" meta="kb-hw-spec"
-        desc="硬件层运维规范：GPU / IB 卡 / 存储控制器的温度、误码率等阈值标准与更换处置建议。"
-        tags={[{ color: V.text3, text: '条目 84' }, { color: V.warn, text: '索引更新中' }]}
-        source="更新于 2026-09-28"
-        actions={<span style={{ display: 'flex', gap: 6 }}><Btn>编辑</Btn><Btn>删除</Btn></span>}
-      />
-    ) },
-  ].filter(k => vis(k.scope, role))
+
+  const runQuery = useCallback(async (targetPage: number, intent: 'query' | 'page' = 'query') => {
+    const setBusyFlag = intent === 'page' ? setPaging : setQuerying
+    setBusyFlag(true)
+    try {
+      const result = await face.listBases({
+        ...(keyword.trim() === '' ? {} : { keyword: keyword.trim() }),
+        page: targetPage,
+        pageSize: RAG_PAGE_SIZE,
+      })
+      setData(result)
+      setPage(result.page)
+      setError(null)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusyFlag(false)
+    }
+  }, [face, keyword])
+
+  useEffect(() => {
+    void runQuery(1, 'page') // 仅挂载时首查（静默）；筛选变化由“查询”按钮触发
+  }, [])
+
+  const openCreate = async () => {
+    setCreateError(null)
+    setDraft({ name: '', description: '', modelId: '' })
+    setCreating(true)
+    try {
+      const options = await face.listEmbeddingModels()
+      setModels(options)
+      if (options.length > 0) setDraft(d => ({ ...d, modelId: options[0]?.id ?? '' }))
+    } catch (reason: unknown) {
+      setCreateError(reason instanceof Error ? reason.message : String(reason))
+    }
+  }
+
+  const submitCreate = async () => {
+    if (saving) return
+    const model = models.find(m => m.id === draft.modelId)
+    if (draft.name.trim() === '') {
+      setCreateError('请填写知识库名称')
+      return
+    }
+    if (model === undefined) {
+      setCreateError('请选择嵌入模型')
+      return
+    }
+    setSaving(true)
+    setCreateError(null)
+    try {
+      await face.createBase({
+        name: draft.name.trim(),
+        ...(draft.description.trim() === '' ? {} : { description: draft.description.trim() }),
+        embeddingModelId: model.id,
+        embeddingModelName: model.name,
+      })
+      setCreating(false)
+      await runQuery(1, 'page')
+    } catch (reason: unknown) {
+      setCreateError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const confirmRemove = async () => {
+    if (removing === null || busyId !== null) return
+    setBusyId(removing.id)
+    try {
+      await face.deleteBase([removing.id])
+      setRemoving(null)
+      if (activeKb?.id === removing.id) {
+        setActiveKb(null)
+        setActiveDoc(null)
+      }
+      await runQuery(1, 'page')
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const loadDocs = useCallback(async (kb: AiopsRagBase, targetPage: number) => {
+    setDocsBusy(true)
+    try {
+      const result = await face.pageDocuments({ kbId: kb.id, page: targetPage, pageSize: DOC_PAGE_SIZE })
+      setDocs(result)
+      setDocPage(result.page)
+      setDocsError(null)
+    } catch (reason: unknown) {
+      setDocsError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setDocsBusy(false)
+    }
+  }, [face])
+
+  const openDocs = async (kb: AiopsRagBase) => {
+    setActiveKb(kb)
+    setActiveDoc(null)
+    setDocs(undefined)
+    await loadDocs(kb, 1)
+  }
+
+  const onUploadFile = async (file: File | undefined) => {
+    if (activeKb === null || file === undefined || uploading) return
+    if (file.size > UPLOAD_MAX_BYTES) {
+      setDocsError(`文件超过 ${formatBytes(UPLOAD_MAX_BYTES)} 上限：${file.name}`)
+      return
+    }
+    setUploading(true)
+    setDocsError(null)
+    try {
+      const buffer = await file.arrayBuffer()
+      let binary = ''
+      const bytes = new Uint8Array(buffer)
+      const step = 0x8000
+      for (let i = 0; i < bytes.length; i += step) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + step))
+      }
+      await face.uploadDocument(activeKb.id, file.name, btoa(binary))
+      await loadDocs(activeKb, 1)
+    } catch (reason: unknown) {
+      setDocsError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const deleteDoc = async (row: AiopsRagDocumentRow) => {
+    if (activeKb === null || docBusyId !== null) return
+    setDocBusyId(row.id)
+    try {
+      await face.deleteDocuments([row.id])
+      if (activeDoc?.id === row.id) setActiveDoc(null)
+      await loadDocs(activeKb, docPage)
+    } catch (reason: unknown) {
+      setDocsError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setDocBusyId(null)
+    }
+  }
+
+  const loadChunks = useCallback(async (doc: AiopsRagDocumentRow, targetPage: number) => {
+    setChunksBusy(true)
+    try {
+      const result = await face.pageChunks({ kbId: doc.kbId, documentId: doc.id, page: targetPage, pageSize: CHUNK_PAGE_SIZE })
+      setChunks(result)
+      setChunkPage(result.page)
+      setChunksError(null)
+    } catch (reason: unknown) {
+      setChunksError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setChunksBusy(false)
+    }
+  }, [face])
+
+  const openChunks = async (doc: AiopsRagDocumentRow) => {
+    setActiveDoc(doc)
+    setChunks(undefined)
+    await loadChunks(doc, 1)
+  }
+
+  const runSearch = async () => {
+    if (searching) return
+    if (searchKbId === '') {
+      setSearchError('请先选择知识库')
+      return
+    }
+    if (searchText.trim() === '') {
+      setSearchError('请输入检索内容')
+      return
+    }
+    setSearching(true)
+    setSearchError(null)
+    try {
+      setHits(await face.searchKb([searchKbId], searchText.trim(), 5))
+    } catch (reason: unknown) {
+      setSearchError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / RAG_PAGE_SIZE))
+  const docTotalPages = Math.max(1, Math.ceil((docs?.total ?? 0) / DOC_PAGE_SIZE))
+  const chunkTotalPages = Math.max(1, Math.ceil((chunks?.total ?? 0) / CHUNK_PAGE_SIZE))
+
   return (
     <div style={{ display: 'grid', gap: 12 }}>
       <FuncCard name="知识库管理" kind="manage">
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-          <span style={{ ...card, padding: '4px 10px', fontSize: 12, color: V.text3, minWidth: 180 }}>查询：知识库名称 / 关键字</span>
-          <Btn>查询</Btn>
-          <Btn primary>创建知识库</Btn>
-          <span style={{ marginLeft: 'auto', fontSize: 12, color: V.text3 }}>已对接：KBMatrix（外部系统，备选开源 RAGFlow）</span>
+          <input
+            value={keyword}
+            onChange={(e) => { setKeyword(e.target.value) }}
+            onKeyDown={(e) => { if (e.key === 'Enter') void runQuery(1) }}
+            placeholder="查询：知识库名称 / 描述"
+            style={{ padding: '5px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, minWidth: 200, background: 'transparent', color: V.text }}
+          />
+          <Btn primary disabled={querying} onClick={() => { void runQuery(1) }}>{querying ? '查询中…' : '查询'}</Btn>
+          <Btn disabled={saving} onClick={() => { void openCreate() }}>创建知识库</Btn>
+          <span style={{ marginLeft: 'auto', fontSize: 12, color: V.text3 }}>已对接：KBMatrix 知识库平台</span>
         </div>
-        <div style={grid}>{kbs.map((k, i) => <span key={i} style={{ display: 'contents' }}>{k.card}</span>)}</div>
-        <div style={{ fontSize: 12, color: V.text3, marginTop: 10 }}>
-          知识库支持查询、创建、编辑与删除等生命周期管理，库内知识条目支持新增、修改、查询、删除，变更后增量更新索引、即时生效。
-        </div>
-        <Pager total={kbs.length} unit="个知识库" />
+        {error !== null && <div style={{ fontSize: 12.5, color: V.error, marginBottom: 10 }}>{error}</div>}
+        {data === undefined && error === null && <div style={{ fontSize: 12.5, color: V.text3 }}>加载中…</div>}
+        {data !== undefined && data.total === 0 && (
+          <div style={{ fontSize: 12.5, color: V.text3 }}>暂无匹配知识库，调整关键字或点击「创建知识库」新建。</div>
+        )}
+        {data !== undefined && data.total > 0 && (
+          <div style={grid}>
+            {data.rows.map(row => (
+              <ItemCard
+                key={row.id}
+                icon={row.name.slice(0, 1)} iconColor="#5b6ee1"
+                name={row.name} meta={`${row.category} · ${row.embeddingModelName}`}
+                desc={row.description === '' ? '（未填写描述）' : row.description}
+                tags={[
+                  { color: V.text3, text: `文档 ${row.documentCount}` },
+                  { color: V.text3, text: `存储 ${formatBytes(row.storageSize)}` },
+                  row.lifecycleStatus === 'READY'
+                    ? { color: V.success, text: '索引就绪' }
+                    : { color: V.warn, text: row.lifecycleStatus === '' ? '状态未知' : `索引 ${row.lifecycleStatus}` },
+                ]}
+                actions={<span style={{ display: 'flex', gap: 6 }}>
+                  <Btn primary disabled={busyId !== null} onClick={() => { void openDocs(row) }}>文档管理</Btn>
+                  <Btn danger disabled={busyId !== null} onClick={() => { setRemoving(row) }}>删除</Btn>
+                </span>}
+              />
+            ))}
+          </div>
+        )}
+        <Pager
+          total={data?.total ?? 0}
+          unit="个知识库"
+          page={page}
+          pages={totalPages}
+          busy={querying || paging}
+          onPage={(next) => { void runQuery(next, 'page') }}
+        />
       </FuncCard>
+
+      {activeKb !== null && (
+        <FuncCard name={`文档管理 · ${activeKb.name}`} kind="manage">
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+            <Btn onClick={() => { setActiveKb(null); setActiveDoc(null) }}>返回库列表</Btn>
+            <Btn primary disabled={uploading} onClick={() => { uploadInputRef.current?.click() }}>
+              {uploading ? '上传中…' : '上传文档'}
+            </Btn>
+            <input
+              ref={uploadInputRef}
+              type="file"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                e.target.value = ''
+                void onUploadFile(file)
+              }}
+            />
+            <span style={{ fontSize: 12, color: V.text3 }}>支持 Markdown / PDF / Word 等，≤20MB；上传后平台自动解析分块并增量更新索引。</span>
+          </div>
+          {docsError !== null && <div style={{ fontSize: 12.5, color: V.error, marginBottom: 10 }}>{docsError}</div>}
+          {docs === undefined && docsError === null && <div style={{ fontSize: 12.5, color: V.text3 }}>加载中…</div>}
+          {docs !== undefined && docs.total === 0 && <div style={{ fontSize: 12.5, color: V.text3 }}>库内暂无文档，点击「上传文档」添加。</div>}
+          {docs !== undefined && docs.total > 0 && (
+            <div style={{ display: 'grid', gap: 6 }}>
+              {docs.rows.map(row => (
+                <div
+                  key={row.id}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                    border: `1px solid ${activeDoc?.id === row.id ? V.brand : V.border}`, borderRadius: 6,
+                  }}
+                >
+                  <span style={{ fontSize: 12.5, color: V.text, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 260 }}>{row.name}</span>
+                  <span style={{ fontSize: 11.5, color: V.text3, fontFamily: V.mono }}>
+                    {row.fileType} · {formatBytes(row.fileSize)} · 分块 {row.chunkCount}
+                  </span>
+                  <Tag color={row.statusName === '已完成' ? V.success : V.warn}>{row.statusName === '' ? '处理中' : row.statusName}</Tag>
+                  <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                    <Btn disabled={docBusyId !== null} onClick={() => { void openChunks(row) }}>分块</Btn>
+                    <Btn danger disabled={docBusyId !== null} onClick={() => { void deleteDoc(row) }}>{docBusyId === row.id ? '删除中…' : '删除'}</Btn>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <Pager
+            total={docs?.total ?? 0}
+            unit="个文档"
+            page={docPage}
+            pages={docTotalPages}
+            busy={docsBusy}
+            onPage={(next) => { void loadDocs(activeKb, next) }}
+          />
+        </FuncCard>
+      )}
+
+      {activeDoc !== null && (
+        <FuncCard name={`分块浏览 · ${activeDoc.name}`} kind="manage">
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+            <Btn onClick={() => { setActiveDoc(null) }}>返回文档列表</Btn>
+            <span style={{ fontSize: 12, color: V.text3 }}>分块是召回的最小单元；变更文档后平台增量重建分块与向量。</span>
+          </div>
+          {chunksError !== null && <div style={{ fontSize: 12.5, color: V.error, marginBottom: 10 }}>{chunksError}</div>}
+          {chunks === undefined && chunksError === null && <div style={{ fontSize: 12.5, color: V.text3 }}>加载中…</div>}
+          {chunks !== undefined && chunks.total === 0 && <div style={{ fontSize: 12.5, color: V.text3 }}>该文档暂无分块。</div>}
+          {chunks !== undefined && chunks.total > 0 && (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {chunks.rows.map((row, index) => (
+                <div key={row.id} style={{ border: `1px solid ${V.border}`, borderRadius: 6, padding: '8px 12px' }}>
+                  <div style={{ fontSize: 11.5, color: V.text3, fontFamily: V.mono, marginBottom: 4 }}>
+                    #{(chunkPage - 1) * CHUNK_PAGE_SIZE + index + 1}{row.title === '' ? '' : ` · ${row.title}`}
+                  </div>
+                  <div style={{ fontSize: 12.5, color: V.text2, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }} className={css.clamp3}>{row.content}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          <Pager
+            total={chunks?.total ?? 0}
+            unit="个分块"
+            page={chunkPage}
+            pages={chunkTotalPages}
+            busy={chunksBusy}
+            onPage={(next) => { void loadChunks(activeDoc, next) }}
+          />
+        </FuncCard>
+      )}
+
       <FuncCard name="知识召回" kind="runtime">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <Note>语义 / 关键词双路召回、Rerank 融合重排、出处标注；召回知识经去重与冲突消解后自动注入推理上下文，随诊断链路执行，无需人工操作。</Note>
-          <Switch on={inject} onChange={setInject} label="知识召回注入推理链路" />
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <Note>语义 / 关键词双路召回、Rerank 融合重排、出处标注；召回知识经去重与冲突消解后自动注入推理上下文，随诊断链路执行，无需人工操作。</Note>
+            <Switch on={inject} onChange={setInject} label="知识召回注入推理链路" />
+          </div>
+          <div style={{ borderTop: `1px solid ${V.border}`, paddingTop: 10, display: 'grid', gap: 8 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: V.text2 }}>检索测试</div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <select
+                value={searchKbId}
+                onChange={(e) => { setSearchKbId(e.target.value) }}
+                style={{ padding: '5px 8px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text, minWidth: 160 }}
+              >
+                <option value="" style={optionStyle}>选择知识库</option>
+                {(data?.rows ?? []).map(row => <option key={row.id} value={row.id} style={optionStyle}>{row.name}</option>)}
+              </select>
+              <input
+                value={searchText}
+                onChange={(e) => { setSearchText(e.target.value) }}
+                onKeyDown={(e) => { if (e.key === 'Enter') void runSearch() }}
+                placeholder="输入检索内容，回车发起混合检索（Top 5）"
+                style={{ padding: '5px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, flex: 1, minWidth: 220, background: 'transparent', color: V.text }}
+              />
+              <Btn primary disabled={searching} onClick={() => { void runSearch() }}>{searching ? '检索中…' : '检索'}</Btn>
+            </div>
+            {searchError !== null && <div style={{ fontSize: 12.5, color: V.error }}>{searchError}</div>}
+            {hits !== undefined && hits.length === 0 && <div style={{ fontSize: 12.5, color: V.text3 }}>未命中：调整检索内容或降低相似度阈值后重试。</div>}
+            {hits !== undefined && hits.length > 0 && (
+              <div style={{ display: 'grid', gap: 6 }}>
+                {hits.map((hit, index) => (
+                  <div key={index} style={{ border: `1px solid ${V.border}`, borderRadius: 6, padding: '8px 12px' }}>
+                    <div style={{ fontSize: 11.5, color: V.text3, marginBottom: 4 }}>
+                      命中 {index + 1}{hit.score === undefined ? '' : ` · 相似度 ${hit.score.toFixed(3)}`}{hit.documentName === undefined ? '' : ` · 出自 ${hit.documentName}`}
+                    </div>
+                    <div style={{ fontSize: 12.5, color: V.text2, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }} className={css.clamp3}>{hit.content}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </FuncCard>
+
+      {creating && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
+          <div style={{ ...card, width: 420, padding: '16px 18px', display: 'grid', gap: 10, boxShadow: '0 12px 40px rgba(0,0,0,.28)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: V.text }}>创建知识库</div>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>名称</span>
+              <input
+                value={draft.name}
+                onChange={(e) => { setDraft({ ...draft, name: e.target.value }) }}
+                placeholder="例如：运维经验沉淀"
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text }}
+              />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>描述</span>
+              <input
+                value={draft.description}
+                onChange={(e) => { setDraft({ ...draft, description: e.target.value }) }}
+                placeholder="知识内容范围与用途"
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text }}
+              />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>嵌入模型</span>
+              <select
+                value={draft.modelId}
+                onChange={(e) => { setDraft({ ...draft, modelId: e.target.value }) }}
+                style={{ padding: '6px 8px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text }}
+              >
+                {models.length === 0 && <option value="" style={optionStyle}>（模型清单加载失败或未配置）</option>}
+                {models.map(m => <option key={m.id} value={m.id} style={optionStyle}>{m.name}</option>)}
+              </select>
+            </label>
+            {createError !== null && <div style={{ fontSize: 12.5, color: V.error }}>{createError}</div>}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Btn onClick={() => { setCreating(false) }}>取消</Btn>
+              <Btn primary disabled={saving} onClick={() => { void submitCreate() }}>{saving ? '创建中…' : '创建'}</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {removing !== null && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
+          <div style={{ ...card, width: 380, padding: '16px 18px', display: 'grid', gap: 10, boxShadow: '0 12px 40px rgba(0,0,0,.28)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: V.text }}>删除知识库</div>
+            <div style={{ fontSize: 13, color: V.text2, lineHeight: 1.7 }}>
+              确认删除「{removing.name}」？库内 {removing.documentCount} 个文档及其分块索引将一并删除，该操作不可恢复。
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Btn onClick={() => { setRemoving(null) }}>取消</Btn>
+              <Btn danger disabled={busyId !== null} onClick={() => { void confirmRemove() }}>{busyId !== null ? '删除中…' : '确认删除'}</Btn>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1647,24 +2068,18 @@ function McpTab({ face }: { face: AiopsMcpFace }) {
 }
 
 /* ---------- 页面骨架 ---------- */
-// 智能体/日志/记忆页签单独渲染：它们需要 apply 注入的数据面，View 仅承载纯展示页签。
 const TABS = [
-  { key: 'agents', label: '智能体管理', Icon: IconAgentPresetOutlineRegular, View: undefined },
-  { key: 'rag', label: 'RAG 管理', Icon: IconDatabaseOutlineRegular, View: RagTab },
-  { key: 'skills', label: 'skills 管理', Icon: IconSkillOutlineRegular, View: undefined },
-  { key: 'logs', label: '日志管理', Icon: IconChecklistOutlineRegular, View: undefined },
-  { key: 'memory', label: '记忆管理', Icon: IconThinkOutlineRegular, View: undefined },
-  { key: 'mcp', label: 'MCP 接口管理', Icon: IconApiOutlineRegular, View: undefined },
+  { key: 'agents', label: '智能体管理', Icon: IconAgentPresetOutlineRegular },
+  { key: 'rag', label: 'RAG 管理', Icon: IconDatabaseOutlineRegular },
+  { key: 'skills', label: 'skills 管理', Icon: IconSkillOutlineRegular },
+  { key: 'logs', label: '日志管理', Icon: IconChecklistOutlineRegular },
+  { key: 'memory', label: '记忆管理', Icon: IconThinkOutlineRegular },
+  { key: 'mcp', label: 'MCP 接口管理', Icon: IconApiOutlineRegular },
 ] as const
 
 type TabKey = (typeof TABS)[number]['key']
 
 type Account = { name: string; role: number }
-
-/** 平台角色 → 控制台视图：1（系统管理员）可见全部资源，其余角色按普通运维账户过滤 */
-function toConsoleRole(role: number): Role {
-  return role === 1 ? 'admin' : 'os'
-}
 
 /** 平台账户共享状态：localStorage 键 + 窗口事件，与左下角账户组件（ui-settings-account）共用。 */
 const PLATFORM_KEY = 'aiops.account'
@@ -1685,8 +2100,9 @@ export function AiopsConsolePage(props: {
   memory: AiopsMemoryFace
   skills: AiopsSkillsFace
   mcp: AiopsMcpFace
+  rag: AiopsRagFace
 }) {
-  const { t, agents: agentsFace, logs: logsFace, memory: memoryFace, skills: skillsFace, mcp: mcpFace } = props
+  const { t, agents: agentsFace, logs: logsFace, memory: memoryFace, skills: skillsFace, mcp: mcpFace, rag: ragFace } = props
   // 初始页签：平台入口页跳转指定（pf_tab Cookie → consumeInitialTab），默认智能体管理
   const [tab, setTab] = useState<TabKey>(() => {
     const v = consumeInitialTab()
@@ -1702,8 +2118,6 @@ export function AiopsConsolePage(props: {
       window.removeEventListener('storage', sync)
     }
   }, [])
-  const Active = TABS.find(x => x.key === tab && x.View !== undefined)?.View
-  const role: Role = account ? toConsoleRole(account.role) : 'admin'
 
   return (
     <div style={{ padding: '20px 24px', maxWidth: 980, margin: '0 auto', color: V.text }}>
@@ -1739,17 +2153,12 @@ export function AiopsConsolePage(props: {
               </button>
             ))}
           </div>
-          {tab === 'agents'
-            ? <AgentsTab face={agentsFace} />
-            : tab === 'logs'
-              ? <LogsTab face={logsFace} />
-              : tab === 'skills'
-                ? <SkillsTab face={skillsFace} />
-                : tab === 'mcp'
-                  ? <McpTab face={mcpFace} />
-                  : tab === 'memory' || Active === undefined
-                    ? <MemoryTab face={memoryFace} />
-                    : <Active role={role} />}
+          {tab === 'agents' ? <AgentsTab face={agentsFace} />
+            : tab === 'rag' ? <RagTab face={ragFace} />
+              : tab === 'logs' ? <LogsTab face={logsFace} />
+                : tab === 'skills' ? <SkillsTab face={skillsFace} />
+                  : tab === 'mcp' ? <McpTab face={mcpFace} />
+                    : <MemoryTab face={memoryFace} />}
         </>
       )}
     </div>

@@ -13,6 +13,7 @@ import aiopsLogsRemote from '@gac2/dsh-aiops-log-controller/remote'
 import aiopsMemoryRemote from '@gac2/dsh-aiops-memory-controller/remote'
 import aiopsSkillsRemote from '@gac2/dsh-aiops-skill-controller/remote'
 import aiopsMcpRemote from '@gac2/dsh-aiops-mcp-controller/remote'
+import aiopsRagRemote from '@gac2/dsh-aiops-rag-controller/remote'
 import officeToPdfRemote from '@deepseek-ai/dsh-office-to-pdf/remote'
 import goalsRemote from '@deepseek-ai/dsh-goal/remote'
 import scheduleRemote from '@deepseek-ai/dsh-schedule/remote'
@@ -192,7 +193,7 @@ export async function apply(ctx: Context): Promise<() => Promise<void>> {
   try {
     for (const contribution of [
       productAnalyticsRemote, agentPresetsRemote, commandsRemote, settingsControllerRemote, accountRemote,
-      aiopsAgentsRemote, aiopsLogsRemote, aiopsMemoryRemote, aiopsSkillsRemote, aiopsMcpRemote,
+      aiopsAgentsRemote, aiopsLogsRemote, aiopsMemoryRemote, aiopsSkillsRemote, aiopsMcpRemote, aiopsRagRemote,
       goalsRemote, llmRemote, dynamicRemote, scheduleRemote,
       pluginInventoryRemote, pluginManagerRemote, pluginMarketRemote, pluginRegistryProbeRemote,
       messageFeedbackRemote, sessionFeedbackRemote,

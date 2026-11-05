@@ -42,6 +42,17 @@
         consoleUsername: nacos
         consolePassword: nacos
 
+    # RAG 管理：KBMatrix 知识库（data-infra FastAPI 读写面）代理——知识库清单/创建/删除、
+    # 文档分页/上传/删除、分块浏览、检索测试；令牌经 web 前门 login-local 获取并内存缓存，
+    # 认证失效自动重登一次。
+    - id: aiops-rag-controller
+      name: '@gac2/dsh-aiops-rag-controller'
+      config:
+        apiOrigin: http://192.168.32.14:6061
+        authOrigin: http://192.168.32.14:6060
+        username: superadmin
+        password: xzinfra@2025
+
     # 运维智能体模板预设：会话级身份与工具集（含 A2A 委托工具）。
     # 控制台注册的每个智能体都以它为克隆模板；它不出现在控制台清单中。
     - id: preset-os-agent

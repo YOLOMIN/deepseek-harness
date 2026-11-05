@@ -1,0 +1,31 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/aiops/rag-controller/README.md
+/:
+  en: 876a4270de7acceb
+  zh: 7a36c300fba22f8a
+/gac2-dsh-aiops-rag-controller:
+  en: 73eb3bd3cc75b66d
+  zh: 72cec48769cea786
+/gac2-dsh-aiops-rag-controller/summary:
+  en: 08342ebfb2e7fb08
+  zh: 28236d32ca99a5ff
+/gac2-dsh-aiops-rag-controller/table-of-contents:
+  en: f59c744089e826bc
+  zh: adc27a3c31c4d4ee
+/gac2-dsh-aiops-rag-controller/use-this-package:
+  en: 8f534cc9f2eba4cd
+  zh: f5a892389fe6592f
+/gac2-dsh-aiops-rag-controller/model-experience:
+  en: 2fb253416c8a362b
+  zh: cd30c7ea1f415299
+/gac2-dsh-aiops-rag-controller/model-experience/kv-cache-effect:
+  en: 42c5bb4663649ac6
+  zh: 7d46fe2324d3ef79
+/gac2-dsh-aiops-rag-controller/known-limitations-and-deferred-work:
+  en: e1cb792ba1f247e9
+  zh: bb8521d2aa322613
+/gac2-dsh-aiops-rag-controller/known-limitations-and-deferred-work/development-note:
+  en: 0b14615c614a0808
+  zh: a810f339d3546ad8

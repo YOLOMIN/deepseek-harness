@@ -118,6 +118,8 @@
       "@gac2/dsh-aiops-mcp-controller/types": ["./packages/aiops/mcp-controller/src/types.ts"],
       "@gac2/dsh-aiops-skill-controller": ["./packages/aiops/skill-controller/src/index.ts"],
       "@gac2/dsh-aiops-skill-controller/types": ["./packages/aiops/skill-controller/src/types.ts"],
+      "@gac2/dsh-aiops-rag-controller": ["./packages/aiops/rag-controller/src/index.ts"],
+      "@gac2/dsh-aiops-rag-controller/types": ["./packages/aiops/rag-controller/src/types.ts"],
       "@gac2/dsh-client-ui-aiops": ["./packages/aiops/ui-console/src/index.ts"],
       "@gac2/dsh-client-ui-aiops/client": ["./packages/aiops/ui-console/src/client/index.ts"],
       "@deepseek-ai/dsh-hmr": ["./packages/boot/hmr/src"],
