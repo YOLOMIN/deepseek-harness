@@ -7,10 +7,18 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import z from '@deepseek-ai/schemastery'
 import { AcpCopilotPool, type CopilotPermission, type SseEvent } from './acp-copilot.ts'
 
-/** Deployment choices for the operations integration routes. */
+/** Deployment choices for the platform integration routes. */
 export interface Config {
-  /** Base origin of the operations platform, used by the health probe. Required per deployment. */
+  /** Base origin of the integrated platform, used by the health probe. Required per deployment. */
   platformOrigin: string
+  /** Platform health endpoint path, appended to platformOrigin. */
+  healthPath: string
+  /** Platform solutions endpoint path receiving pushed plans, appended to platformOrigin. */
+  solutionsPath: string
+  /** Cookie carrying the platform's one-time ticket through the console redirect. */
+  ticketCookieName: string
+  /** Cookie carrying the target tab through the console redirect. */
+  tabCookieName: string
   /** DSH repository or installation root used to launch the ACP Copilot child. */
   dshRoot: string
   /** Workspace shared by ACP Copilot sessions and Web Sessions. */
@@ -34,6 +42,10 @@ export interface Config {
 /** Validated deployment choices. */
 export const Config = z.object({
   platformOrigin: z.string().pattern(/^https?:\/\/[^\s]+$/u),
+  healthPath: z.string().min(1).default('/api/aiops/health'),
+  solutionsPath: z.string().min(1).default('/api/aiops/solutions'),
+  ticketCookieName: z.string().min(1).default('pf_ticket'),
+  tabCookieName: z.string().min(1).default('pf_tab'),
   dshRoot: z.string().min(1).default(process.cwd()),
   sessionCwd: z.string().min(1).default(process.cwd()),
   consoleTarget: z.string().pattern(/^https?:\/\/[^\s]+$/u).default('http://127.0.0.1:3080/'),
@@ -132,16 +144,17 @@ async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
 }
 
 /**
- * Mount the operations integration routes on an isolated webServer.
+ * Mount the platform integration routes on an isolated webServer.
  *
- * 平台账户体系对接（账号口令认证 /api/aiops/login、免登票据 /api/aiops/ticket 与
- * /api/aiops/ticket-login、健康检查 /api/aiops/health）由运维平台以标准接口形式提供，
- * 本中继不再承担认证适配职责，仅保留两类控制端自身能力：
- *   - /console：平台"智能运维控制台入口"跳转链路，经同进程 connection 服务的
- *     authenticatedUrl 注入 dsh 访问令牌，并透传平台签发的免登票据（pf_ticket）
- *     与目标页签（pf_tab）；
- *   - /api/aiops/chat：运维 Copilot 流式诊断通道（SSE），由常驻 ACP 子进程
- *     （dsh --profile acp）按会话承载，替换逐消息冷启动。
+ * 本中继是任意平台对接 DSH 的通用入口：平台侧按标准契约提供认证与健康接口
+ * （login/ticket/ticket-login/health，路径可由 healthPath 配置），本中继只保留
+ * 控制端自身能力：
+ *   - /console：控制台跳转链路，经同进程 connection 服务的 authenticatedUrl 注入
+ *     dsh 访问令牌，并以可配置饼干名透传平台签发的免登票据与目标页签；
+ *   - /api/aiops/chat：Copilot 流式诊断通道（SSE），由常驻 ACP 子进程
+ *     （dsh --profile acp）按会话承载，替换逐消息冷启动；
+ *   - /api/aiops/permission：ask 策略下权限请求的人工应答回填；
+ *   - 方案推送：答复完成时把方案与动作块 POST 到平台 solutionsPath（Bearer 认证）。
  */
 export function apply(ctx: Context, config: Config): void {
   const copilot = new AcpCopilotPool({
@@ -164,7 +177,7 @@ export function apply(ctx: Context, config: Config): void {
         source: 'dsh-copilot',
         sessionId,
       }
-      const response = await fetch(`${config.platformOrigin}/api/aiops/solutions`, {
+      const response = await fetch(`${config.platformOrigin}${config.solutionsPath}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -174,12 +187,12 @@ export function apply(ctx: Context, config: Config): void {
         signal: AbortSignal.timeout(config.solutionPushTimeoutMs),
       })
       if (!response.ok) {
-        ctx.logger.warn(`aiops-auth-relay: solution push failed: HTTP ${response.status}`)
+        ctx.logger.warn(`platform-relay: solution push failed: HTTP ${response.status}`)
         return { pushed: false, reason: `平台返回 HTTP ${response.status}` }
       }
       const result = await response.json() as { status?: number; data?: { id?: string; page?: string } }
       if (result.status !== 0 || result.data?.id === undefined) {
-        ctx.logger.warn(`aiops-auth-relay: solution push rejected: ${JSON.stringify(result).slice(0, 200)}`)
+        ctx.logger.warn(`platform-relay: solution push rejected: ${JSON.stringify(result).slice(0, 200)}`)
         return { pushed: false, reason: '平台拒绝接收方案' }
       }
       return {
@@ -193,7 +206,7 @@ export function apply(ctx: Context, config: Config): void {
 
   const health = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
-      const upstream = await fetch(`${config.platformOrigin}/api/aiops/health`, { signal: AbortSignal.timeout(config.requestTimeoutMs) })
+      const upstream = await fetch(`${config.platformOrigin}${config.healthPath}`, { signal: AbortSignal.timeout(config.requestTimeoutMs) })
       json(res, upstream.ok ? 200 : 502, { ok: upstream.ok, platform: config.platformOrigin, upstream: upstream.status })
     } catch (error) {
       json(res, 502, { ok: false, platform: config.platformOrigin, error: error instanceof Error ? error.message : String(error) })
@@ -203,16 +216,16 @@ export function apply(ctx: Context, config: Config): void {
   const consoleEntry = (req: IncomingMessage, res: ServerResponse): void => {
     try {
       const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-      // 免登票据由平台标准接口 /api/aiops/ticket 在平台会话内签发，此处仅透传给控制台页面；
-      // 控制台挂载后凭票据向平台 /api/aiops/ticket-login 核销，换取账号与角色完成免登
+      // 免登票据由平台在其会话内签发，此处仅透传给控制台页面；
+      // 控制台挂载后凭票据向平台核销接口换取账号与角色完成免登
       const ticket = url.searchParams.get('ticket')
       const tab = url.searchParams.get('tab')
       const headers: Record<string, string | string[]> = { Location: ctx.connection.authenticatedUrl(config.consoleTarget) }
       const cookies: string[] = []
       if (ticket && /^[A-Za-z0-9_-]{10,200}$/.test(ticket)) {
-        cookies.push(`pf_ticket=${ticket}; Path=/; Max-Age=60; SameSite=Lax`)
+        cookies.push(`${config.ticketCookieName}=${ticket}; Path=/; Max-Age=60; SameSite=Lax`)
       }
-      if (tab && /^[a-z]+$/.test(tab)) cookies.push(`pf_tab=${tab}; Path=/; Max-Age=60; SameSite=Lax`)
+      if (tab && /^[a-z]+$/.test(tab)) cookies.push(`${config.tabCookieName}=${tab}; Path=/; Max-Age=60; SameSite=Lax`)
       if (cookies.length > 0) headers['Set-Cookie'] = cookies
       res.writeHead(302, headers)
       res.end()
@@ -265,9 +278,9 @@ export function apply(ctx: Context, config: Config): void {
           if (!res.writableEnded) json(res, 200, { status: -1, msg: `中继异常：${error instanceof Error ? error.message : String(error)}` })
         })
       },
-    }), `aiops-auth-relay: ${route.path}`)
+    }), `platform-relay: ${route.path}`)
   }
   ctx.effect(() => () => {
     void copilot.dispose()
-  }, 'aiops-auth-relay: dispose')
+  }, 'platform-relay: dispose')
 }

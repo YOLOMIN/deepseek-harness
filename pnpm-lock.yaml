@@ -3314,9 +3314,9 @@ importers:
       '@gac2/dsh-client-ui-aiops':
         specifier: workspace:*
         version: link:../../aiops/ui-console
-      '@gac2/dsh-scmms-relay':
+      '@gac2/dsh-platform-relay':
         specifier: workspace:*
-        version: link:../../platform/scmms-relay
+        version: link:../../platform/relay
       commander:
         specifier: ^15.0.0
         version: 15.0.0
@@ -11820,7 +11820,7 @@ importers:
         specifier: workspace:*
         version: link:../../interaction/user-questions
 
-  packages/platform/scmms-relay:
+  packages/platform/relay:
     dependencies:
       '@agentclientprotocol/sdk':
         specifier: 1.4.0

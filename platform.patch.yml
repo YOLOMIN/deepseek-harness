@@ -1,24 +1,22 @@
-# 运维平台对接叠加层：独立于智能运维控制台（aiops.patch.yml），供任何团队单独取用。
-# 提供：独立 3081 端口的集成中继（运维 Copilot 流式诊断、控制台跳转、操作级人工确认路由），
-# 平台账户认证适配由运维平台标准接口 /api/aiops/* 直接提供（登录/免登票据/健康检查/方案闭环）。
+# 平台对接叠加层（通用入口）：任意平台均可经此接入 DSH，与智能运维控制台解耦。
+# 提供：独立 3081 端口的集成中继（控制台跳转、健康检查、Copilot 流式诊断、
+# 操作级人工确认、方案推送闭环）；平台侧按标准契约实现 /api/aiops/* 接口即可接入。
 # 用法：pnpm dsh --profile web --patch platform.patch.yml [--patch aiops.patch.yml] --no-open
 - insert:
     # 集成中继：独立 3081 webServer，与主 Web 3080 共享 DSH 生命周期。
-    # 仅保留控制台跳转（经同进程 connection 服务注入访问令牌、透传免登票据）
-    # 与 Copilot 流式通道；平台账户认证适配由运维平台标准接口 /api/aiops/* 直接提供。
-    - id: scmms-relay-group
+    - id: platform-relay-group
       name: cordis:group
       group: true
       isolate:
         webServer: true
       config:
-        - id: scmms-relay-webserver
+        - id: platform-relay-webserver
           name: '@deepseek-ai/dsh-host-webserver'
           config:
             host: 127.0.0.1
             port: 3081
-        - id: scmms-relay
-          name: '@gac2/dsh-scmms-relay'
+        - id: platform-relay
+          name: '@gac2/dsh-platform-relay'
           config:
             platformOrigin: http://192.168.10.95:9091
             dshRoot: .
@@ -29,5 +27,5 @@
             permission: ask
             # 沙箱收紧为只读：写操作必须经人工批准后沙箱升级执行（配合 ask 形成人在环上）
             sandboxMode: read-only
-            # Copilot 答复完成时把方案推送到平台 /api/aiops/solutions（人工审批闭环）
+            # Copilot 答复完成时把方案推送到平台（默认 /api/aiops/solutions，可配置）
             platformBearerToken: mcp_sysadm_testtoken123

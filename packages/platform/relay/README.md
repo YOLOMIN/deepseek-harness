@@ -1,22 +1,22 @@
 ---
-description: "SCMMS platform integration relay: console entry, ticket pass-through, Copilot streaming diagnosis, human-in-the-loop permission answers, and the solution push closed loop."
+description: "Generic platform integration relay for DSH: console entry, ticket pass-through, Copilot streaming diagnosis, human-in-the-loop permission answers, and the solution push closed loop."
 kind: "package-reference"
 ---
 
-# @gac2/dsh-scmms-relay
+# @gac2/dsh-platform-relay
 
 English | [中文](README.zh.md)
 
 ## Summary
 
-The **standalone plugin** for SCMMS platform integration (split out of the aiops console code on 2026-11-05, formerly `@gac2/dsh-aiops-auth-relay`), so any team can integrate the platform without the operations console. Mounted on an isolated DSH `webServer` (default `127.0.0.1:3081`), it provides:
+The **generic integration plugin** for connecting any platform to DSH (split out of the aiops console code and generalized): a platform only needs to implement the standard contract endpoints to integrate, decoupled from any concrete platform. Mounted on an isolated DSH `webServer` (default `127.0.0.1:3081`), it provides:
 
 - console entry (injects the dsh access token, passes through the platform's one-time ticket and target tab);
 - platform health check (`/health` forwarding `/api/aiops/health`);
 - the Copilot SSE diagnosis channel (a persistent ACP child `dsh --profile acp`; every browser conversation is a standard ACP session);
 - operation-level human confirmation (with `permission: ask`, permission prompts are held and forwarded as SSE events, answered through `POST /api/aiops/permission`) and the solution push closed loop (on completion, the plan with its `exec_actions` block is pushed to the platform `/api/aiops/solutions`).
 
-Platform account integration consumes the platform's standard `/api/aiops/*` endpoints; the platform-side companion implementation (solution closed-loop and the Copilot frontend component) is maintained in the operations platform repository (`router/aiops/` and `ks-scmms-ui`); this repository carries only the DSH-side integration plugin.
+Platform account integration consumes the platform's standard `/api/aiops/*` endpoints; platform account integration consumes the platform contract endpoints (paths configurable); the first reference implementation is maintained in the operations platform repository, while this repository carries only the generic DSH-side plugin.
 
 ## Table of Contents
 

@@ -1,22 +1,22 @@
 ---
-description: "运维平台（ks-scmms）对接中继：控制台跳转、免登票据透传、Copilot 流式诊断、操作级人工确认与方案推送闭环。"
+description: "任意平台对接 DSH 的通用集成中继：控制台跳转、免登票据透传、Copilot 流式诊断、操作级人工确认与方案推送闭环。"
 kind: "package-reference"
 ---
 
-# @gac2/dsh-scmms-relay
+# @gac2/dsh-platform-relay
 
 [English](README.md) | 中文
 
 ## 概述
 
-运维平台对接的**独立插件**（2026-11-05 从 aiops 控制台代码中拆出，原名 `@gac2/dsh-aiops-auth-relay`），供任何团队在不引入智能运维控制台的前提下对接 ks-scmms 平台。在隔离的 DSH `webServer`（默认 `127.0.0.1:3081`）上挂载四类能力：
+任意平台对接 DSH 的**通用集成插件**（自 aiops 控制台代码拆出并通用化），平台侧按标准契约实现健康/认证/方案接口即可接入，与具体平台实现解耦。在隔离的 DSH `webServer`（默认 `127.0.0.1:3081`）上挂载四类能力：
 
 - 控制台跳转（注入 dsh 访问令牌、透传平台免登票据与目标页签）；
 - 平台健康检查（`/health` 透传 `/api/aiops/health`）；
 - Copilot SSE 流式诊断通道（常驻 ACP 子进程 `dsh --profile acp`，浏览器会话即标准 ACP 会话）；
 - 操作级人工确认（`permission: ask` 时权限请求挂起转 SSE 事件，`POST /api/aiops/permission` 回填）与方案推送闭环（答复完成时把方案与 `exec_actions` 动作块推送到平台 `/api/aiops/solutions`）。
 
-平台账户体系对接直接使用平台标准 `/api/aiops/*` 接口；平台侧配套实现（方案闭环与 Copilot 前端组件）随高性能集群监控平台仓库维护（`router/aiops/` 与 `ks-scmms-ui`），本仓库只保留 DSH 对接插件。
+平台账户体系对接使用平台侧按标准契约提供的 `/api/aiops/*` 接口（路径可配置）；首个参考实现随高性能集群监控平台仓库维护，本仓库只保留 DSH 侧通用插件。
 
 ## 目录
 

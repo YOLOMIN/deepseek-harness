@@ -1,5 +1,5 @@
 {
-  "name": "@gac2/dsh-scmms-relay",
+  "name": "@gac2/dsh-platform-relay",
   "description": "Operations console entry and Copilot integration routes for GAC2 AIOps",
   "version": "0.1.0",
   "private": true,

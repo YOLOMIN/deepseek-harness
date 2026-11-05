@@ -16,7 +16,7 @@ async function fixture(healthy = true) {
   const home = await mkdtemp(join(tmpdir(), 'dsh-aiops-relay-'))
   cleanups.push(() => rm(home, { recursive: true, force: true }))
   const upstream = createServer((req, res) => {
-    if (req.url === '/api/aiops/health') res.end('{"status":0,"msg":"","data":{"service":"ks-scmms"}}')
+    if (req.url === '/api/aiops/health') res.end('{"status":0,"msg":"","data":{"service":"platform"}}')
     else { res.statusCode = 404; res.end() }
   })
   await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve))

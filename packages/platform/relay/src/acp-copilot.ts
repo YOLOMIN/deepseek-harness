@@ -4,7 +4,7 @@
  * One long-lived `dsh --profile acp` child carries every browser conversation as a
  * standard ACP session, replacing the per-message headless cold start.
  *
- * @module @gac2/dsh-aiops-auth-relay/acp-copilot
+ * @module @gac2/dsh-platform-relay/acp-copilot
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -372,7 +372,7 @@ export class AcpCopilotPool {
       join(dshRoot, 'apps/cli/src/bin.ts'),
       '--profile', 'acp', '--patch', join(dshRoot, patchPath),
     ], { cwd: this.options.sessionCwd, env: childEnv })))(env)
-    const app = createAcpClientApp({ name: 'gac2-aiops-auth-relay' })
+    const app = createAcpClientApp({ name: 'gac2-platform-relay' })
       .onNotification(methods.client.session.update, ({ params }) => {
         this.updateSinks.get(params.sessionId)?.(params.update)
       })

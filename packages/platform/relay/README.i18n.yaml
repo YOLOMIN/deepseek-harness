@@ -1,0 +1,31 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/platform/relay/README.md
+/:
+  en: 14296733e4d8bc25
+  zh: c3cfc5dff0dea3c6
+/gac2-dsh-platform-relay:
+  en: 1c14eba97b504299
+  zh: 43f72d438ff6079a
+/gac2-dsh-platform-relay/summary:
+  en: f8ae163e34c3e61b
+  zh: 7305e7ef6ec896a9
+/gac2-dsh-platform-relay/table-of-contents:
+  en: af856ba79fe31b8e
+  zh: 15b7d1a5d1856de2
+/gac2-dsh-platform-relay/use-this-package:
+  en: 575d1c567537d68d
+  zh: a540cc7a6bedd40e
+/gac2-dsh-platform-relay/model-experience:
+  en: 5d1dd66134c2f1a8
+  zh: c068582808948227
+/gac2-dsh-platform-relay/model-experience/kv-cache-effect:
+  en: fcffe72a0842d7aa
+  zh: 5b04d675571a4df7
+/gac2-dsh-platform-relay/known-limitations-and-deferred-work:
+  en: d8ddf324b359e597
+  zh: bc8332ddcfcb3f49
+/gac2-dsh-platform-relay/known-limitations-and-deferred-work/dev-note:
+  en: cad7133189e827e2
+  zh: 30eadafcf018ecb2
