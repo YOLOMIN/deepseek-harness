@@ -1,36 +1,8 @@
 # 智能运维控制台叠加层：在 web 组合的浏览器插件表中追加 aiops 控制台，
 # 并声明运维智能体体系（Web 会话默认挂载注册表种子 ops-agent）；
 # headless 链路（运维 Copilot）无预设机制，身份与委托能力见 aiops-headless.patch.yml。
+# 平台对接中继已独立为 platform.patch.yml，需要 Copilot/方案闭环时与本文档一并叠加。
 - insert:
-    # 集成中继：独立 3081 webServer，与主 Web 3080 共享 DSH 生命周期。
-    # 仅保留控制台跳转（经同进程 connection 服务注入访问令牌、透传免登票据）
-    # 与 Copilot 流式通道；平台账户认证适配由运维平台标准接口 /api/aiops/* 直接提供。
-    - id: aiops-auth-relay-group
-      name: cordis:group
-      group: true
-      isolate:
-        webServer: true
-      config:
-        - id: aiops-relay-webserver
-          name: '@deepseek-ai/dsh-host-webserver'
-          config:
-            host: 127.0.0.1
-            port: 3081
-        - id: aiops-auth-relay
-          name: '@gac2/dsh-aiops-auth-relay'
-          config:
-            platformOrigin: http://192.168.10.95:9091
-            dshRoot: .
-            sessionCwd: .
-            consoleTarget: http://127.0.0.1:3080/
-            # 权限策略 ask：智能体工具调用权限请求挂起并转成 SSE 事件，
-            # 由 Copilot 面板人工点选后回填（allow 为自动放行、reject 为自动拒绝）
-            permission: ask
-            # 沙箱收紧为只读：写操作必须经人工批准后沙箱升级执行（配合 ask 形成人在环上）
-            sandboxMode: read-only
-            # Copilot 答复完成时把方案推送到平台 /api/aiops/solutions（人工审批闭环）
-            platformBearerToken: mcp_sysadm_testtoken123
-
     - id: aiops-console
       name: '@gac2/dsh-client-ui-aiops'
 

@@ -1247,31 +1247,6 @@ importers:
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
 
-  packages/aiops/auth-relay:
-    dependencies:
-      '@agentclientprotocol/sdk':
-        specifier: 1.4.0
-        version: 1.4.0(zod@4.4.3)
-    devDependencies:
-      '@deepseek-ai/cordis':
-        specifier: workspace:~
-        version: link:../../../vendor/cordis
-      '@deepseek-ai/dsh-client-connection':
-        specifier: workspace:*
-        version: link:../../client/connection
-      '@deepseek-ai/dsh-credentials':
-        specifier: workspace:*
-        version: link:../../credentials/credentials
-      '@deepseek-ai/dsh-credentials-local':
-        specifier: workspace:*
-        version: link:../../credentials/credentials-local
-      '@deepseek-ai/dsh-host-webserver':
-        specifier: workspace:*
-        version: link:../../host/webserver
-      '@deepseek-ai/schemastery':
-        specifier: link:../../../vendor/schemastery
-        version: link:../../../vendor/schemastery
-
   packages/aiops/log-controller:
     dependencies:
       '@deepseek-ai/dsh-typert-protocol':
@@ -3324,9 +3299,6 @@ importers:
       '@gac2/dsh-aiops-agent-controller':
         specifier: workspace:*
         version: link:../../aiops/agent-controller
-      '@gac2/dsh-aiops-auth-relay':
-        specifier: workspace:*
-        version: link:../../aiops/auth-relay
       '@gac2/dsh-aiops-log-controller':
         specifier: workspace:*
         version: link:../../aiops/log-controller
@@ -3342,6 +3314,9 @@ importers:
       '@gac2/dsh-client-ui-aiops':
         specifier: workspace:*
         version: link:../../aiops/ui-console
+      '@gac2/dsh-scmms-relay':
+        specifier: workspace:*
+        version: link:../../platform/scmms-relay
       commander:
         specifier: ^15.0.0
         version: 15.0.0
@@ -11844,6 +11819,31 @@ importers:
       '@deepseek-ai/dsh-user-questions':
         specifier: workspace:*
         version: link:../../interaction/user-questions
+
+  packages/platform/scmms-relay:
+    dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: 1.4.0
+        version: 1.4.0(zod@4.4.3)
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-client-connection':
+        specifier: workspace:*
+        version: link:../../client/connection
+      '@deepseek-ai/dsh-credentials':
+        specifier: workspace:*
+        version: link:../../credentials/credentials
+      '@deepseek-ai/dsh-credentials-local':
+        specifier: workspace:*
+        version: link:../../credentials/credentials-local
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: workspace:*
+        version: link:../../host/webserver
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
 
   packages/preset/agent-preset:
     dependencies:
