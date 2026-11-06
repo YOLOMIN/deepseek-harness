@@ -43,6 +43,8 @@ export interface Config {
   uploadTimeoutMs: number
   /** Display label of the connected platform (swap-ready when the deployment moves to another RAG vendor). */
   platformLabel: string
+  /** Minimum similarity for injected hits (0-1); low-relevance content never reaches the model. */
+  similarityThreshold: number
   /** Console-saved recall settings file; defaults to `~/.dsh/aiops-rag-settings.json`. */
   settingsPath: string
 }
@@ -56,6 +58,7 @@ export const Config = z.object({
   requestTimeoutMs: z.number().min(1000).max(120_000).default(15_000),
   uploadTimeoutMs: z.number().min(10_000).max(600_000).default(120_000),
   platformLabel: z.string().min(1).default('KBMatrix 知识库平台'),
+  similarityThreshold: z.number().min(0).max(1).default(0.4),
   settingsPath: z.string().min(1).default(join(homedir(), '.dsh', 'aiops-rag-settings.json')),
 })
 
@@ -114,6 +117,7 @@ const settingsInputSchema = zod.object({
   authOrigin: zod.string().regex(/^https?:\/\/\S+$/u, '认证地址必须是 http(s) URL').optional(),
   username: zod.string().optional(),
   password: zod.string().optional(),
+  similarityThreshold: zod.number().min(0, '阈值 ∈ [0,1]').max(1, '阈值 ∈ [0,1]').optional(),
 })
 
 const searchSchema = zod.object({
@@ -371,17 +375,18 @@ export class AiopsRagController extends TypertRemoteService {
     })).data as ReadonlyArray<Record<string, unknown>> | undefined
     // 平台侧已知缺陷（2026-11-06 实测）：多库 hybrid 直接 500（COMMON_1000 system error），
     // 向量侧未预热时 hybrid/embedding 恒空。策略：hybrid 全量 → keyword 全量 → 逐库 keyword 合并。
+    const threshold = (await this.effectiveSettings()).similarityThreshold
     const hybrid = await this.trySearch(() => request('hybrid', parsed.data.kbIds))
-    if (hybrid !== undefined && hybrid.length > 0) return hybrid.map(hit => mapHit(hit))
+    if (hybrid !== undefined && hybrid.length > 0) return filterByScore(hybrid.map(hit => mapHit(hit)), threshold)
     const keyword = await this.trySearch(() => request('keyword', parsed.data.kbIds))
-    if (keyword !== undefined && keyword.length > 0) return keyword.map(hit => mapHit(hit))
+    if (keyword !== undefined && keyword.length > 0) return filterByScore(keyword.map(hit => mapHit(hit)), threshold)
     const merged: AiopsRagSearchHit[] = []
     for (const id of parsed.data.kbIds) {
       const single = await this.trySearch(() => request('keyword', [id]))
       if (single !== undefined) merged.push(...single.map(hit => mapHit(hit)))
     }
     if (merged.length > 0) {
-      return merged
+      return [...filterByScore(merged, threshold)]
         .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
         .slice(0, topK)
     }
@@ -400,6 +405,7 @@ export class AiopsRagController extends TypertRemoteService {
    * @returns matched chunks as hits, best coverage first.
    */
   private async localSearch(kbIds: readonly string[], text: string, topK: number): Promise<readonly AiopsRagSearchHit[]> {
+    const threshold = (await this.effectiveSettings()).similarityThreshold
     const terms = tokenizeQuery(text)
     if (terms.length === 0) return []
     const hits: AiopsRagSearchHit[] = []
@@ -424,7 +430,8 @@ export class AiopsRagController extends TypertRemoteService {
           const content = typeof chunk.content === 'string' ? chunk.content : ''
           const haystack = content.toLowerCase()
           const matched = terms.filter(term => haystack.includes(term)).length
-          if (matched === 0) continue
+          // 覆盖率低于阈值的条目不进推理链路，避免低相关内容误导结论
+          if (matched / terms.length < threshold) continue
           hits.push({
             content,
             score: matched / terms.length,
@@ -516,6 +523,7 @@ export class AiopsRagController extends TypertRemoteService {
       authOrigin: parsed.data.authOrigin ?? current.authOrigin,
       username: parsed.data.username ?? current.username,
       password: parsed.data.password ?? current.password,
+      similarityThreshold: parsed.data.similarityThreshold ?? current.similarityThreshold,
     }
     await mkdir(dirname(this.config.settingsPath), { recursive: true })
     await writeFile(this.config.settingsPath, JSON.stringify(next, null, 2), 'utf8')
@@ -546,6 +554,7 @@ export class AiopsRagController extends TypertRemoteService {
             authOrigin: parsed.data.authOrigin ?? this.config.authOrigin,
             username: parsed.data.username ?? this.config.username,
             password: parsed.data.password ?? this.config.password,
+            similarityThreshold: parsed.data.similarityThreshold ?? this.config.similarityThreshold,
           }
         }
       } catch {
@@ -559,6 +568,7 @@ export class AiopsRagController extends TypertRemoteService {
       authOrigin: this.config.authOrigin,
       username: this.config.username,
       password: this.config.password,
+      similarityThreshold: this.config.similarityThreshold,
     }
   }
 
@@ -675,6 +685,11 @@ export class AiopsRagController extends TypertRemoteService {
     if (token === undefined || token === '') throw authFailed()
     this.token = token
   }
+}
+
+/** Drop hits below the similarity floor; hits without a score pass through. */
+function filterByScore(hits: readonly AiopsRagSearchHit[], threshold: number): readonly AiopsRagSearchHit[] {
+  return hits.filter(hit => hit.score === undefined || hit.score >= threshold)
 }
 
 /** Split a query into matchable terms: ASCII/数字 words lowercased; CJK 连续段切二元组（单字噪声大，丢弃）。 */

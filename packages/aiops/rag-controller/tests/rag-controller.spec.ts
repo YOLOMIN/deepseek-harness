@@ -388,10 +388,27 @@ describe('AiopsRagController.searchKb local fallback', () => {
       }
       return { json: { code: '200', data: [] } }
     })
-    const hits = await controller.searchKb({ kbIds: ['kb-1'], text: 'GPU 温度过高怎么处置' })
+    const hits = await controller.searchKb({ kbIds: ['kb-1'], text: 'GPU 温度' })
     expect(hits).toHaveLength(1)
     expect(hits[0]?.documentName).toBe('处置手册.md')
     expect(hits[0]?.content).toContain('85℃')
+  })
+
+  it('excludes low-coverage chunks below the similarity threshold from the local fallback', async () => {
+    const { controller } = fixture()
+    stubFetch((url) => {
+      if (url.includes('/auth/login-local')) return LOGIN_ANSWER
+      if (url.includes('/kb-document/page')) {
+        return { json: { code: '200', data: { current: 1, total: 1, data: [{ id: 'doc-1', name: '会议纪要.docx' }] } } }
+      }
+      if (url.includes('/chunk/page')) {
+        return { json: { code: '200', data: { current: 1, total: 1, data: [{ id: 'c-9', title: '', content: '项目申报材料评审会议纪要：功能验收安排' }] } } }
+      }
+      return { json: { code: '200', data: [] } }
+    })
+    // 查询词 8 个分词仅命中「功能」等极少数，覆盖率 < 0.4，不应进推理链路
+    const hits = await controller.searchKb({ kbIds: ['kb-1'], text: '测试知识库召回的功能' })
+    expect(hits).toHaveLength(0)
   })
 })
 

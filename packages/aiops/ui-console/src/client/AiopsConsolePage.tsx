@@ -489,7 +489,7 @@ function RagTab({ face }: { face: AiopsRagFace }) {
   const [chunkDraft, setChunkDraft] = useState('')
   const [chunkSaving, setChunkSaving] = useState(false)
   const [configOpen, setConfigOpen] = useState(false)
-  const [configDraft, setConfigDraft] = useState({ platformLabel: '', apiOrigin: '', authOrigin: '', username: '', password: '' })
+  const [configDraft, setConfigDraft] = useState({ platformLabel: '', apiOrigin: '', authOrigin: '', username: '', password: '', similarityThreshold: '0.4' })
   const [configSaving, setConfigSaving] = useState(false)
   const [configError, setConfigError] = useState<string | null>(null)
 
@@ -750,6 +750,7 @@ function RagTab({ face }: { face: AiopsRagFace }) {
         authOrigin: current.authOrigin,
         username: current.username,
         password: current.password,
+        similarityThreshold: String(current.similarityThreshold),
       })
     } catch (reason: unknown) {
       setConfigError(reason instanceof Error ? reason.message : String(reason))
@@ -761,12 +762,18 @@ function RagTab({ face }: { face: AiopsRagFace }) {
     setConfigSaving(true)
     setConfigError(null)
     try {
+      const threshold = Number(configDraft.similarityThreshold)
+      if (!(threshold >= 0 && threshold <= 1)) {
+        setConfigError('相似度阈值需为 0~1 之间的小数')
+        return
+      }
       await face.saveSettings({
         platformLabel: configDraft.platformLabel.trim(),
         apiOrigin: configDraft.apiOrigin.trim(),
         authOrigin: configDraft.authOrigin.trim(),
         username: configDraft.username.trim(),
         password: configDraft.password,
+        similarityThreshold: threshold,
       })
       setConfigOpen(false)
       setPlatform(null)
@@ -1087,6 +1094,15 @@ function RagTab({ face }: { face: AiopsRagFace }) {
               <input
                 value={configDraft.username}
                 onChange={(e) => { setConfigDraft({ ...configDraft, username: e.target.value }) }}
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text }}
+              />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>召回相似度阈值（0~1，低于阈值的知识不进推理链路）</span>
+              <input
+                value={configDraft.similarityThreshold}
+                onChange={(e) => { setConfigDraft({ ...configDraft, similarityThreshold: e.target.value }) }}
+                placeholder="0.4"
                 style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text }}
               />
             </label>

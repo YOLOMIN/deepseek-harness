@@ -190,4 +190,6 @@ export interface AiopsRagSettings {
   readonly username: string
   /** 平台口令。 */
   readonly password: string
+  /** 召回相似度阈值（0~1）：平台命中低于阈值丢弃，本地降级要求词覆盖率不低于阈值。 */
+  readonly similarityThreshold: number
 }
