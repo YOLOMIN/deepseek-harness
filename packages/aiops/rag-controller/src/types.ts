@@ -161,3 +161,23 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'aiops-rag/auth': Record<string, never>
   }
 }
+
+/** Knowledge-base info update accepted by the aiopsRag namespace. */
+export interface AiopsRagBaseUpdateInput {
+  readonly id: string
+  readonly name: string
+  readonly description?: string | undefined
+}
+
+/** Chunk content update accepted by the aiopsRag namespace. */
+export interface AiopsRagChunkUpdateInput {
+  readonly id: string
+  readonly title?: string | undefined
+  readonly content: string
+}
+
+/** Console-editable RAG settings (persisted beside the DSH user root). */
+export interface AiopsRagSettings {
+  /** 知识召回注入推理链路：关闭后 knowledge_search 工具拒绝召回。 */
+  readonly recallEnabled: boolean
+}

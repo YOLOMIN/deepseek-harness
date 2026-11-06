@@ -24,7 +24,8 @@ import type {
   AiopsMcpRegisterInput, AiopsMcpServerDetail, AiopsMcpServerPage, AiopsMcpServerRow, AiopsMcpSettings,
 } from '@gac2/dsh-aiops-mcp-controller/types'
 import type {
-  AiopsRagBase, AiopsRagBasePage, AiopsRagChunkPage, AiopsRagDocumentPage, AiopsRagDocumentRow, AiopsRagModelOption, AiopsRagSearchHit,
+  AiopsRagBase, AiopsRagBasePage, AiopsRagChunkPage, AiopsRagChunkRow, AiopsRagDocumentPage, AiopsRagDocumentRow,
+  AiopsRagModelOption, AiopsRagSearchHit,
 } from '@gac2/dsh-aiops-rag-controller/types'
 import type { AiopsLocaleKey } from './locales.ts'
 import {
@@ -478,7 +479,15 @@ function RagTab({ face }: { face: AiopsRagFace }) {
   const [hits, setHits] = useState<readonly AiopsRagSearchHit[] | undefined>(undefined)
   const [searchError, setSearchError] = useState<string | null>(null)
   const [inject, setInject] = useState(true)
+  const [injectSaving, setInjectSaving] = useState(false)
   const [platform, setPlatform] = useState<{ label: string; apiOrigin: string } | null>(null)
+  const [editing, setEditing] = useState<AiopsRagBase | null>(null)
+  const [editDraft, setEditDraft] = useState({ name: '', description: '' })
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+  const [editingChunk, setEditingChunk] = useState<string | null>(null)
+  const [chunkDraft, setChunkDraft] = useState('')
+  const [chunkSaving, setChunkSaving] = useState(false)
 
   const runQuery = useCallback(async (targetPage: number, intent: 'query' | 'page' = 'query') => {
     const setBusyFlag = intent === 'page' ? setPaging : setQuerying
@@ -502,6 +511,7 @@ function RagTab({ face }: { face: AiopsRagFace }) {
   useEffect(() => {
     void runQuery(1, 'page') // 仅挂载时首查（静默）；筛选变化由“查询”按钮触发
     void face.getPlatformInfo().then(setPlatform).catch(() => undefined)
+    void face.getSettings().then((settings) => { setInject(settings.recallEnabled) }).catch(() => undefined)
   }, [])
 
   const openCreate = async () => {
@@ -665,6 +675,66 @@ function RagTab({ face }: { face: AiopsRagFace }) {
     }
   }
 
+  const flipInject = async (value: boolean) => {
+    if (injectSaving) return
+    const previous = inject
+    setInject(value)
+    setInjectSaving(true)
+    try {
+      await face.saveSettings({ recallEnabled: value })
+    } catch (reason: unknown) {
+      setInject(previous)
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setInjectSaving(false)
+    }
+  }
+
+  const openEdit = (row: AiopsRagBase) => {
+    setEditDraft({ name: row.name, description: row.description })
+    setEditError(null)
+    setEditing(row)
+  }
+
+  const submitEdit = async () => {
+    if (editing === null || editSaving) return
+    if (editDraft.name.trim() === '') {
+      setEditError('请填写知识库名称')
+      return
+    }
+    setEditSaving(true)
+    setEditError(null)
+    try {
+      await face.updateBase({ id: editing.id, name: editDraft.name.trim(), description: editDraft.description.trim() })
+      setEditing(null)
+      await runQuery(page, 'page')
+    } catch (reason: unknown) {
+      setEditError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  const startChunkEdit = (row: AiopsRagChunkRow) => {
+    setEditingChunk(row.id)
+    setChunkDraft(row.content)
+  }
+
+  const submitChunkEdit = async () => {
+    if (editingChunk === null || chunkSaving || activeDoc === null) return
+    if (chunkDraft.trim() === '') return
+    setChunkSaving(true)
+    try {
+      await face.updateChunk({ id: editingChunk, content: chunkDraft.trim() })
+      setEditingChunk(null)
+      await loadChunks(activeDoc, chunkPage)
+    } catch (reason: unknown) {
+      setChunksError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setChunkSaving(false)
+    }
+  }
+
   const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / RAG_PAGE_SIZE))
   const docTotalPages = Math.max(1, Math.ceil((docs?.total ?? 0) / DOC_PAGE_SIZE))
   const chunkTotalPages = Math.max(1, Math.ceil((chunks?.total ?? 0) / CHUNK_PAGE_SIZE))
@@ -706,6 +776,7 @@ function RagTab({ face }: { face: AiopsRagFace }) {
                 ]}
                 actions={<span style={{ display: 'flex', gap: 6 }}>
                   <Btn primary disabled={busyId !== null} onClick={() => { void openDocs(row) }}>文档管理</Btn>
+                  <Btn disabled={busyId !== null} onClick={() => { openEdit(row) }}>编辑</Btn>
                   <Btn danger disabled={busyId !== null} onClick={() => { setRemoving(row) }}>删除</Btn>
                 </span>}
               />
@@ -726,7 +797,7 @@ function RagTab({ face }: { face: AiopsRagFace }) {
         <div style={{ display: 'grid', gap: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <Note>语义 / 关键词双路召回、Rerank 融合重排、出处标注；召回知识经去重与冲突消解后自动注入推理上下文，随诊断链路执行，无需人工操作。</Note>
-            <Switch on={inject} onChange={setInject} label="知识召回注入推理链路" />
+            <Switch on={inject} onChange={(v) => { void flipInject(v) }} label="知识召回注入推理链路" />
           </div>
           <div style={{ borderTop: `1px solid ${V.border}`, paddingTop: 10, display: 'grid', gap: 8 }}>
             <div style={{ fontSize: 12.5, fontWeight: 600, color: V.text2 }}>检索测试</div>
@@ -846,10 +917,30 @@ function RagTab({ face }: { face: AiopsRagFace }) {
                     <div style={{ display: 'grid', gap: 8 }}>
                       {chunks.rows.map((row, index) => (
                         <div key={row.id} style={{ border: `1px solid ${V.border}`, borderRadius: 6, padding: '8px 12px' }}>
-                          <div style={{ fontSize: 11.5, color: V.text3, fontFamily: V.mono, marginBottom: 4 }}>
-                            #{(chunkPage - 1) * CHUNK_PAGE_SIZE + index + 1}{row.title === '' ? '' : ` · ${row.title}`}
+                          <div style={{ fontSize: 11.5, color: V.text3, fontFamily: V.mono, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span>#{(chunkPage - 1) * CHUNK_PAGE_SIZE + index + 1}{row.title === '' ? '' : ` · ${row.title}`}</span>
+                            {editingChunk !== row.id && (
+                              <span style={{ marginLeft: 'auto' }}>
+                                <Btn disabled={chunkSaving} onClick={() => { startChunkEdit(row) }}>编辑</Btn>
+                              </span>
+                            )}
                           </div>
-                          <div style={{ fontSize: 12.5, color: V.text2, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }} className={css.clamp3}>{row.content}</div>
+                          {editingChunk === row.id ? (
+                            <div style={{ display: 'grid', gap: 6 }}>
+                              <textarea
+                                value={chunkDraft}
+                                onChange={(e) => { setChunkDraft(e.target.value) }}
+                                rows={5}
+                                style={{ padding: '6px 8px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12, lineHeight: 1.6, background: 'transparent', color: V.text2, resize: 'vertical' }}
+                              />
+                              <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                <Btn onClick={() => { setEditingChunk(null) }}>取消</Btn>
+                                <Btn primary disabled={chunkSaving} onClick={() => { void submitChunkEdit() }}>{chunkSaving ? '保存中…' : '保存'}</Btn>
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 12.5, color: V.text2, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }} className={css.clamp3}>{row.content}</div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -906,6 +997,35 @@ function RagTab({ face }: { face: AiopsRagFace }) {
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <Btn onClick={() => { setCreating(false) }}>取消</Btn>
               <Btn primary disabled={saving} onClick={() => { void submitCreate() }}>{saving ? '创建中…' : '创建'}</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editing !== null && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
+          <div style={{ ...card, width: 420, padding: '16px 18px', display: 'grid', gap: 10, boxShadow: '0 12px 40px rgba(0,0,0,.28)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: V.text }}>编辑知识库</div>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>名称</span>
+              <input
+                value={editDraft.name}
+                onChange={(e) => { setEditDraft({ ...editDraft, name: e.target.value }) }}
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text }}
+              />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>描述</span>
+              <input
+                value={editDraft.description}
+                onChange={(e) => { setEditDraft({ ...editDraft, description: e.target.value }) }}
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text }}
+              />
+            </label>
+            {editError !== null && <div style={{ fontSize: 12.5, color: V.error }}>{editError}</div>}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Btn onClick={() => { setEditing(null) }}>取消</Btn>
+              <Btn primary disabled={editSaving} onClick={() => { void submitEdit() }}>{editSaving ? '保存中…' : '保存'}</Btn>
             </div>
           </div>
         </div>

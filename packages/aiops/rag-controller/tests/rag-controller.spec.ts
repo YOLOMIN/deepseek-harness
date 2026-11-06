@@ -1,3 +1,6 @@
+import { tmpdir } from 'node:os'
+import { resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AiopsRagController from '../src/index.ts'
@@ -5,6 +8,7 @@ import type { Config } from '../src/index.ts'
 
 function fixture() {
   const ctx = new Context()
+  const dir = resolve(tmpdir(), `aiops-rag-test-${randomUUID()}`)
   const config: Config = {
     apiOrigin: 'http://kb-api.test',
     authOrigin: 'http://kb-web.test',
@@ -12,9 +16,11 @@ function fixture() {
     password: 'secret',
     requestTimeoutMs: 5000,
     uploadTimeoutMs: 20000,
+    platformLabel: 'KBMatrix 知识库平台',
+    settingsPath: resolve(dir, 'settings.json'),
   }
   const controller = new AiopsRagController(ctx, config)
-  return { controller }
+  return { controller, dir }
 }
 
 /** Stub globalThis.fetch with the given handler; restored in afterEach. Returns the spy. */
@@ -275,5 +281,84 @@ describe('AiopsRagController.searchKb / listEmbeddingModels', () => {
       })
     const options = await controller.listEmbeddingModels()
     expect(options).toEqual([{ id: 'm-emb', name: 'qwen3.7-embedding' }])
+  })
+})
+
+describe('AiopsRagController.updateBase / updateChunk', () => {
+  it('updates base name and description', async () => {
+    const { controller } = fixture()
+    let sent: Record<string, unknown> | undefined
+    stubFetch((url, init) => {
+      if (url.includes('/auth/login-local')) return LOGIN_ANSWER
+      sent = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : undefined
+      return { json: { code: '200', data: null } }
+    })
+    await controller.updateBase({ id: 'kb-1', name: '新名称', description: '新描述' })
+    expect(sent).toEqual({ id: 'kb-1', name: '新名称', description: '新描述' })
+  })
+
+  it('updates chunk content', async () => {
+    const { controller } = fixture()
+    let sent: Record<string, unknown> | undefined
+    stubFetch((url, init) => {
+      if (url.includes('/auth/login-local')) return LOGIN_ANSWER
+      sent = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : undefined
+      return { json: { code: '200', data: null } }
+    })
+    await controller.updateChunk({ id: 'c-1', content: '修订后的内容' })
+    expect(sent).toEqual({ id: 'c-1', content: '修订后的内容' })
+  })
+
+  it('rejects empty chunk content before any HTTP call', async () => {
+    const { controller } = fixture()
+    const spy = stubFetch(() => LOGIN_ANSWER)
+    await expect(controller.updateChunk({ id: 'c-1', content: '' })).rejects.toMatchObject({ code: 'aiops-rag/invalid' })
+    expect(spy).not.toHaveBeenCalled()
+  })
+})
+
+describe('AiopsRagController recall settings + recallKnowledge', () => {
+  it('recall defaults to enabled and searches every base', async () => {
+    const { controller, dir } = fixture()
+    const searched: string[] = []
+    stubFetch((url, init) => {
+      if (url.includes('/auth/login-local')) return LOGIN_ANSWER
+      if (url.includes('/kb-base/list-all')) return { json: { code: '200', data: [BASE_ENTRY] } }
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) as { kb_ids: string[] } : undefined
+      searched.push(...(body?.kb_ids ?? []))
+      return { json: { code: '200', data: [{ content: '命中', score: 0.9, document_name: 'a.docx', id: 'c-1' }] } }
+    })
+    const result = await controller.recallKnowledge('巡检', 5)
+    expect(result.enabled).toBe(true)
+    expect(searched).toEqual(['kb-1'])
+    expect(result.hits[0]?.documentName).toBe('a.docx')
+    void dir
+  })
+
+  it('recall disabled by the saved switch returns empty without searching', async () => {
+    const { controller } = fixture()
+    stubFetch(url => url.includes('/auth/login-local') ? LOGIN_ANSWER : { json: { code: '200', data: [] } })
+    await controller.saveSettings({ recallEnabled: false })
+    const result = await controller.recallKnowledge('巡检', 5)
+    expect(result).toEqual({ enabled: false, hits: [] })
+    const settings = await controller.getSettings()
+    expect(settings.recallEnabled).toBe(false)
+  })
+})
+
+describe('AiopsRagController.searchKb resilience', () => {
+  it('falls back to per-base keyword merge when multi-base search 500s', async () => {
+    const { controller } = fixture()
+    stubFetch((url, init) => {
+      if (url.includes('/auth/login-local')) return LOGIN_ANSWER
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) as { kb_ids: string[]; search_mode: string } : undefined
+      // 平台缺陷复现：多库 hybrid/keyword 都 500；单库 keyword 正常
+      if (body !== undefined && body.kb_ids.length > 1) return { json: { code: 'COMMON_1000', message: 'system error', data: null } }
+      if (body?.search_mode === 'hybrid') return { json: { code: '200', data: [] } }
+      return { json: { code: '200', data: [{ content: `命中-${body?.kb_ids[0]}`, score: 0.8, document_name: 'a.docx', id: 'c-1' }] } }
+    })
+    const hits = await controller.searchKb({ kbIds: ['kb-1', 'kb-2'], text: '巡检' })
+    expect(hits).toHaveLength(2)
+    expect(hits[0]?.content).toContain('命中-kb-')
   })
 })

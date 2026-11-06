@@ -10,6 +10,9 @@
  * @module @gac2/dsh-aiops-rag-controller
  */
 
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
@@ -18,8 +21,9 @@ import type {
   AiopsRagBase, AiopsRagBaseCreateInput, AiopsRagBasePage, AiopsRagBaseQuery,
   AiopsRagChunkPage, AiopsRagChunkQuery, AiopsRagChunkRow,
   AiopsRagDocumentPage, AiopsRagDocumentQuery, AiopsRagDocumentRow,
-  AiopsRagModelOption, AiopsRagSearchHit, AiopsRagSearchInput, AiopsRagUploadInput,
+  AiopsRagModelOption, AiopsRagSearchHit, AiopsRagSearchInput, AiopsRagSettings, AiopsRagUploadInput,
 } from './types.ts'
+import type { AiopsRagBaseUpdateInput, AiopsRagChunkUpdateInput } from './types.ts'
 
 export type * from './types.ts'
 
@@ -39,6 +43,8 @@ export interface Config {
   uploadTimeoutMs: number
   /** Display label of the connected platform (swap-ready when the deployment moves to another RAG vendor). */
   platformLabel: string
+  /** Console-saved recall settings file; defaults to `~/.dsh/aiops-rag-settings.json`. */
+  settingsPath: string
 }
 
 /** Validated deployment choices. */
@@ -50,6 +56,7 @@ export const Config = z.object({
   requestTimeoutMs: z.number().min(1000).max(120_000).default(15_000),
   uploadTimeoutMs: z.number().min(10_000).max(600_000).default(120_000),
   platformLabel: z.string().min(1).default('KBMatrix 知识库平台'),
+  settingsPath: z.string().min(1).default(join(homedir(), '.dsh', 'aiops-rag-settings.json')),
 })
 
 const baseQuerySchema = zod.object({
@@ -86,6 +93,22 @@ const chunkQuerySchema = zod.object({
   content: zod.string().trim().optional(),
   page: zod.number().int().min(1),
   pageSize: zod.number().int().min(1).max(100),
+})
+
+const updateBaseSchema = zod.object({
+  id: zod.string().min(1),
+  name: zod.string().trim().min(1, '知识库名称不能为空').max(64, '知识库名称 ≤64 字符'),
+  description: zod.string().trim().max(500, '描述 ≤500 字符').optional(),
+})
+
+const updateChunkSchema = zod.object({
+  id: zod.string().min(1),
+  title: zod.string().trim().max(200).optional(),
+  content: zod.string().trim().min(1, '分块内容不能为空').max(8000, '分块内容 ≤8000 字符'),
+})
+
+const settingsInputSchema = zod.object({
+  recallEnabled: zod.boolean().optional(),
 })
 
 const searchSchema = zod.object({
@@ -333,18 +356,40 @@ export class AiopsRagController extends TypertRemoteService {
   async searchKb(input: AiopsRagSearchInput): Promise<readonly AiopsRagSearchHit[]> {
     const parsed = searchSchema.safeParse(input)
     if (!parsed.success) throw invalid('input', parsed.error.issues[0]?.message ?? '参数无效')
-    const request = (mode: string) => this.callPlatform('POST', `${API_PREFIX}/kb-search/search`, {
+    const topK = parsed.data.topK ?? 5
+    const request = async (mode: string, ids: readonly string[]) => (await this.callPlatform('POST', `${API_PREFIX}/kb-search/search`, {
       search_mode: mode,
-      kb_ids: parsed.data.kbIds,
+      kb_ids: ids,
       search_text: parsed.data.text,
-      top_k: parsed.data.topK ?? 5,
+      top_k: topK,
       is_rerank: false,
-    })
-    const hybrid = (await request('hybrid')).data as ReadonlyArray<Record<string, unknown>> | undefined
-    const hits = hybrid !== undefined && hybrid.length > 0
-      ? hybrid
-      : ((await request('keyword')).data as ReadonlyArray<Record<string, unknown>> | undefined) ?? []
-    return hits.map(hit => mapHit(hit))
+    })).data as ReadonlyArray<Record<string, unknown>> | undefined
+    // 平台侧已知缺陷（2026-11-06 实测）：多库 hybrid 直接 500（COMMON_1000 system error），
+    // 向量侧未预热时 hybrid/embedding 恒空。策略：hybrid 全量 → keyword 全量 → 逐库 keyword 合并。
+    const hybrid = await this.trySearch(() => request('hybrid', parsed.data.kbIds))
+    if (hybrid !== undefined && hybrid.length > 0) return hybrid.map(hit => mapHit(hit))
+    const keyword = await this.trySearch(() => request('keyword', parsed.data.kbIds))
+    if (keyword !== undefined) return keyword.map(hit => mapHit(hit))
+    const merged: AiopsRagSearchHit[] = []
+    for (const id of parsed.data.kbIds) {
+      const single = await this.trySearch(() => request('keyword', [id]))
+      if (single !== undefined) merged.push(...single.map(hit => mapHit(hit)))
+    }
+    return merged
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+      .slice(0, topK)
+  }
+
+  /** Run one search variant; platform business failures degrade to undefined for the fallback chain. */
+  private async trySearch(
+    run: () => Promise<ReadonlyArray<Record<string, unknown>> | undefined>,
+  ): Promise<ReadonlyArray<Record<string, unknown>> | undefined> {
+    try {
+      return await run()
+    } catch (error: unknown) {
+      if (error instanceof RemoteError && error.code === 'aiops-rag/upstream') return undefined
+      throw error
+    }
   }
 
   /**
@@ -354,6 +399,98 @@ export class AiopsRagController extends TypertRemoteService {
   @Remote('getPlatformInfo')
   getPlatformInfo(): Promise<{ readonly label: string; readonly apiOrigin: string }> {
     return Promise.resolve({ label: this.config.platformLabel, apiOrigin: this.config.apiOrigin })
+  }
+
+  /**
+   * Update a knowledge base's name/description.
+   * @param input - base id plus the new name and optional description.
+   */
+  @Remote('updateBase')
+  async updateBase(input: AiopsRagBaseUpdateInput): Promise<void> {
+    const parsed = updateBaseSchema.safeParse(input)
+    if (!parsed.success) throw invalid('input', parsed.error.issues[0]?.message ?? '参数无效')
+    await this.callPlatform('POST', `${API_PREFIX}/kb-base/update`, {
+      id: parsed.data.id,
+      name: parsed.data.name,
+      description: parsed.data.description ?? '',
+    })
+  }
+
+  /**
+   * Update one chunk's content (and optionally title).
+   * @param input - chunk id, new content, optional new title.
+   */
+  @Remote('updateChunk')
+  async updateChunk(input: AiopsRagChunkUpdateInput): Promise<void> {
+    const parsed = updateChunkSchema.safeParse(input)
+    if (!parsed.success) throw invalid('input', parsed.error.issues[0]?.message ?? '参数无效')
+    await this.callPlatform('POST', `${API_PREFIX}/kb-document/chunk/update`, {
+      id: parsed.data.id,
+      content: parsed.data.content,
+      ...(parsed.data.title === undefined ? {} : { title: parsed.data.title }),
+    })
+  }
+
+  /**
+   * Read the console-saved recall settings (recall switch); missing file means defaults.
+   * @returns the effective recall settings.
+   */
+  @Remote('getSettings')
+  async getSettings(): Promise<AiopsRagSettings> {
+    return this.readSettings()
+  }
+
+  /**
+   * Persist one recall-settings patch.
+   * @param input - the fields to change.
+   * @returns the saved settings.
+   */
+  @Remote('saveSettings')
+  async saveSettings(input: { readonly recallEnabled?: boolean | undefined }): Promise<AiopsRagSettings> {
+    const parsed = settingsInputSchema.safeParse(input)
+    if (!parsed.success) throw invalid('input', '设置无效')
+    const current = await this.readSettings()
+    const next: AiopsRagSettings = {
+      recallEnabled: parsed.data.recallEnabled ?? current.recallEnabled,
+    }
+    await mkdir(dirname(this.config.settingsPath), { recursive: true })
+    await writeFile(this.config.settingsPath, JSON.stringify(next, null, 2), 'utf8')
+    return next
+  }
+
+  /** Read the persisted recall settings, defaulting to enabled. */
+  private async readSettings(): Promise<AiopsRagSettings> {
+    let raw: string | undefined
+    try {
+      raw = await readFile(this.config.settingsPath, 'utf8')
+    } catch {
+      // 设置文件缺失或不可读时按默认（召回开启）
+    }
+    if (raw !== undefined) {
+      try {
+        const parsed = settingsInputSchema.safeParse(JSON.parse(raw))
+        if (parsed.success) return { recallEnabled: parsed.data.recallEnabled ?? true }
+      } catch {
+        // JSON 损坏等价于无覆盖
+      }
+    }
+    return { recallEnabled: true }
+  }
+
+  /**
+   * Host-side recall for the knowledge_search tool: search every knowledge
+   * base with the recall switch honored. Not a wire method.
+   * @param query - the search text.
+   * @param topK - hit cap.
+   * @returns hits with the switch state; disabled yields an empty list.
+   */
+  async recallKnowledge(query: string, topK: number): Promise<{ readonly enabled: boolean; readonly hits: readonly AiopsRagSearchHit[] }> {
+    const settings = await this.readSettings()
+    if (!settings.recallEnabled) return { enabled: false, hits: [] }
+    const bases = await this.listBases({ page: 1, pageSize: 200 })
+    if (bases.rows.length === 0) return { enabled: true, hits: [] }
+    const hits = await this.searchKb({ kbIds: bases.rows.map(row => row.id), text: query, topK })
+    return { enabled: true, hits }
   }
 
   /**

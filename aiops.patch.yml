@@ -74,6 +74,8 @@
                 处理诊断类问题时，先调用 memory_recall 召回历史诊断经验（长期记忆）作参考；
                 形成明确的故障诊断结论后，必须先调用 memory_record 工具沉淀经验（summary 为一句话结论，
                 detail 为完整结论与处置建议），再输出最终答复；日常问答、寒暄或链路测试不要调用这两个工具。
+                回答运维知识类问题（处置流程、阈值规范、巡检标准等）前，先调用 knowledge_search 查询运维知识库取证，
+                最终答复须标注出处来源（知识库文档名）；未命中时如实说明并基于现有证据分析。
                 不要自称编码智能体。
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
@@ -146,6 +148,9 @@
           # 经验沉淀：形成诊断结论后由智能体主动记录为短期记忆（控制台评估晋升）。
           - id: tool-memory-record
             name: '@gac2/dsh-aiops-memory-controller/tool'
+          # 知识召回：运维知识类问题先查知识库取证，答复标注出处。
+          - id: tool-rag-recall
+            name: '@gac2/dsh-aiops-rag-controller/tool'
 
     # 下层智能体（A2A 委托目标，内部实现，不出现在控制台清单）：
     # 系统智能体负责系统环境层/硬件层（最终执行层，不再下放）；
@@ -173,6 +178,8 @@
                 处理诊断类问题时，先调用 memory_recall 召回历史诊断经验（长期记忆）作参考；
                 形成明确的故障诊断结论后，必须先调用 memory_record 工具沉淀经验（summary 为一句话结论，
                 detail 为完整结论与处置建议），再输出最终答复；日常问答、寒暄或链路测试不要调用这两个工具。
+                回答运维知识类问题（处置流程、阈值规范、巡检标准等）前，先调用 knowledge_search 查询运维知识库取证，
+                最终答复须标注出处来源（知识库文档名）；未命中时如实说明并基于现有证据分析。
                 你是最终执行层，结论直接返回委托方。不要自称编码智能体。
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
@@ -237,6 +244,9 @@
           # 经验沉淀：形成诊断结论后由智能体主动记录为短期记忆（控制台评估晋升）。
           - id: tool-memory-record
             name: '@gac2/dsh-aiops-memory-controller/tool'
+          # 知识召回：运维知识类问题先查知识库取证，答复标注出处。
+          - id: tool-rag-recall
+            name: '@gac2/dsh-aiops-rag-controller/tool'
 
     - id: preset-hpc-agent
       name: '@deepseek-ai/dsh-agent-preset'
@@ -261,6 +271,8 @@
                 处理诊断类问题时，先调用 memory_recall 召回历史诊断经验（长期记忆）作参考；
                 形成明确的故障诊断结论后，必须先调用 memory_record 工具沉淀经验（summary 为一句话结论，
                 detail 为完整结论与处置建议），再输出最终答复；日常问答、寒暄或链路测试不要调用这两个工具。
+                回答运维知识类问题（处置流程、阈值规范、巡检标准等）前，先调用 knowledge_search 查询运维知识库取证，
+                最终答复须标注出处来源（知识库文档名）；未命中时如实说明并基于现有证据分析。
                 不要自称编码智能体。
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
@@ -332,6 +344,9 @@
           # 经验沉淀：形成诊断结论后由智能体主动记录为短期记忆（控制台评估晋升）。
           - id: tool-memory-record
             name: '@gac2/dsh-aiops-memory-controller/tool'
+          # 知识召回：运维知识类问题先查知识库取证，答复标注出处。
+          - id: tool-rag-recall
+            name: '@gac2/dsh-aiops-rag-controller/tool'
 
 # 新建 Web 会话默认挂载运维智能体（注册表种子，启动时由 aiops-agent-controller 注册）
 - id: agent-preset-registry

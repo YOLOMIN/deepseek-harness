@@ -9,6 +9,7 @@
   "references": [
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
-    { "path": "../../typert/protocol" }
+    { "path": "../../typert/protocol" },
+    { "path": "../../core/tools" }
   ]
 }

@@ -7,7 +7,7 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@gac2/dsh-aiops-rag-controller/remote'
 import type {
-  AiopsRagBaseCreateInput, AiopsRagBasePage, AiopsRagBaseQuery,
+  AiopsRagBaseCreateInput, AiopsRagBasePage, AiopsRagBaseQuery, AiopsRagBaseUpdateInput, AiopsRagChunkUpdateInput, AiopsRagSettings,
   AiopsRagChunkPage, AiopsRagChunkQuery,
   AiopsRagDocumentPage, AiopsRagDocumentQuery,
   AiopsRagModelOption, AiopsRagSearchHit,
@@ -21,6 +21,14 @@ export interface AiopsRagFace {
   listBases: (input: AiopsRagBaseQuery) => Promise<AiopsRagBasePage>
   /** Create one knowledge base. */
   createBase: (input: AiopsRagBaseCreateInput) => Promise<{ readonly id: string }>
+  /** Update a knowledge base's name/description. */
+  updateBase: (input: AiopsRagBaseUpdateInput) => Promise<void>
+  /** Update one chunk's content. */
+  updateChunk: (input: AiopsRagChunkUpdateInput) => Promise<void>
+  /** Read the recall settings. */
+  getSettings: () => Promise<AiopsRagSettings>
+  /** Persist one recall-settings patch. */
+  saveSettings: (input: { readonly recallEnabled?: boolean | undefined }) => Promise<AiopsRagSettings>
   /** Delete knowledge bases by id batch. */
   deleteBase: (ids: readonly string[]) => Promise<void>
   /** Page documents of one knowledge base. */
@@ -52,6 +60,10 @@ export function createAiopsRagFace(ctx: ClientContext): AiopsRagFace {
     getPlatformInfo: async () => unwrap(await ctx.remote.aiopsRag.getPlatformInfo()),
     listBases: async input => unwrap(await ctx.remote.aiopsRag.listBases(input)),
     createBase: async input => unwrap(await ctx.remote.aiopsRag.createBase(input)),
+    updateBase: async (input) => { unwrap(await ctx.remote.aiopsRag.updateBase(input)) },
+    updateChunk: async (input) => { unwrap(await ctx.remote.aiopsRag.updateChunk(input)) },
+    getSettings: async () => unwrap(await ctx.remote.aiopsRag.getSettings()),
+    saveSettings: async input => unwrap(await ctx.remote.aiopsRag.saveSettings(input)),
     deleteBase: async (ids) => { unwrap(await ctx.remote.aiopsRag.deleteBase({ ids })) },
     pageDocuments: async input => unwrap(await ctx.remote.aiopsRag.pageDocuments(input)),
     uploadDocument: async (kbId, fileName, contentBase64) => {
