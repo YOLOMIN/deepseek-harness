@@ -15,6 +15,8 @@ import type {
 
 /** RAG tab data and action surface injected by the plugin apply closure. */
 export interface AiopsRagFace {
+  /** Report the connected platform's display label and API origin. */
+  getPlatformInfo: () => Promise<{ readonly label: string; readonly apiOrigin: string }>
   /** Page knowledge bases with an optional keyword filter. */
   listBases: (input: AiopsRagBaseQuery) => Promise<AiopsRagBasePage>
   /** Create one knowledge base. */
@@ -47,6 +49,7 @@ function unwrap<T>(result: { readonly ok: true; readonly value: T } | { readonly
  */
 export function createAiopsRagFace(ctx: ClientContext): AiopsRagFace {
   return {
+    getPlatformInfo: async () => unwrap(await ctx.remote.aiopsRag.getPlatformInfo()),
     listBases: async input => unwrap(await ctx.remote.aiopsRag.listBases(input)),
     createBase: async input => unwrap(await ctx.remote.aiopsRag.createBase(input)),
     deleteBase: async (ids) => { unwrap(await ctx.remote.aiopsRag.deleteBase({ ids })) },

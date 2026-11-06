@@ -37,6 +37,8 @@ export interface Config {
   requestTimeoutMs: number
   /** Document upload timeout in milliseconds; parsing large files is slower. */
   uploadTimeoutMs: number
+  /** Display label of the connected platform (swap-ready when the deployment moves to another RAG vendor). */
+  platformLabel: string
 }
 
 /** Validated deployment choices. */
@@ -47,6 +49,7 @@ export const Config = z.object({
   password: z.string().min(1).required(),
   requestTimeoutMs: z.number().min(1000).max(120_000).default(15_000),
   uploadTimeoutMs: z.number().min(10_000).max(600_000).default(120_000),
+  platformLabel: z.string().min(1).default('KBMatrix 知识库平台'),
 })
 
 const baseQuerySchema = zod.object({
@@ -342,6 +345,15 @@ export class AiopsRagController extends TypertRemoteService {
       ? hybrid
       : ((await request('keyword')).data as ReadonlyArray<Record<string, unknown>> | undefined) ?? []
     return hits.map(hit => mapHit(hit))
+  }
+
+  /**
+   * Report the connected platform's display label and API origin for the console header.
+   * @returns the configured label and origin.
+   */
+  @Remote('getPlatformInfo')
+  getPlatformInfo(): Promise<{ readonly label: string; readonly apiOrigin: string }> {
+    return Promise.resolve({ label: this.config.platformLabel, apiOrigin: this.config.apiOrigin })
   }
 
   /**
