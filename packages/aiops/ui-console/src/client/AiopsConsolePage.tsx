@@ -1809,7 +1809,7 @@ function MemoryTab({ face }: { face: AiopsMemoryFace }) {
             rows={data.rows.map(row => [
               row.agent,
               <Tag key="k" color={row.kind === 'long' ? V.success : V.warn}>{MEMORY_KIND_LABELS[row.kind]}</Tag>,
-              row.summary,
+              <span key="s" className={css.clamp2} title={row.summary} style={{ lineHeight: 1.5 }}>{row.summary}</span>,
               fmtTime(row.time),
               <span key="op" style={{ display: 'flex', gap: 6 }}>
                 <Btn onClick={() => { void openDetail(row) }}>查看</Btn>

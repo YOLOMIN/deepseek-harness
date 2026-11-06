@@ -5,3 +5,11 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* 记忆摘要两行截断：表格行高收敛，全文经「查看」详情与 hover tooltip 获取。 */
+.clamp2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
