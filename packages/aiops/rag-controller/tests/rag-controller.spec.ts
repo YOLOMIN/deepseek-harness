@@ -394,3 +394,30 @@ describe('AiopsRagController.searchKb local fallback', () => {
     expect(hits[0]?.content).toContain('85℃')
   })
 })
+
+describe('AiopsRagSettings platform connection override', () => {
+  it('connection fields override the plugin Config and reset the cached token', async () => {
+    const { controller } = fixture()
+    const seen: string[] = []
+    stubFetch((url) => {
+      seen.push(url)
+      if (url.includes('/auth/login-local')) return { json: { code: '200', message: '', data: { accessToken: `tok-${seen.length}` } } }
+      return { json: { code: '200', data: [] } }
+    })
+    await controller.listBases({ page: 1, pageSize: 10 })
+    expect(seen.some(u => u.includes('kb-api.test'))).toBe(true)
+
+    await controller.saveSettings({ apiOrigin: 'http://kb-other.test:6061', platformLabel: 'RAGFlow' })
+    const settings = await controller.getSettings()
+    expect(settings.apiOrigin).toBe('http://kb-other.test:6061')
+    expect(settings.platformLabel).toBe('RAGFlow')
+    // 老配置字段不受影响
+    expect(settings.authOrigin).toBe('http://kb-web.test')
+
+    seen.length = 0
+    await controller.listBases({ page: 1, pageSize: 10 })
+    // 令牌作废后先在新认证地址重新登录，再走新 API 地址
+    expect(seen.some(u => u.includes('kb-web.test') && u.includes('login-local'))).toBe(true)
+    expect(seen.some(u => u.includes('kb-other.test'))).toBe(true)
+  })
+})

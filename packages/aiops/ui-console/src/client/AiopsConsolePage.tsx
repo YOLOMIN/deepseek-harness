@@ -488,6 +488,10 @@ function RagTab({ face }: { face: AiopsRagFace }) {
   const [editingChunk, setEditingChunk] = useState<string | null>(null)
   const [chunkDraft, setChunkDraft] = useState('')
   const [chunkSaving, setChunkSaving] = useState(false)
+  const [configOpen, setConfigOpen] = useState(false)
+  const [configDraft, setConfigDraft] = useState({ platformLabel: '', apiOrigin: '', authOrigin: '', username: '', password: '' })
+  const [configSaving, setConfigSaving] = useState(false)
+  const [configError, setConfigError] = useState<string | null>(null)
 
   const runQuery = useCallback(async (targetPage: number, intent: 'query' | 'page' = 'query') => {
     const setBusyFlag = intent === 'page' ? setPaging : setQuerying
@@ -735,6 +739,46 @@ function RagTab({ face }: { face: AiopsRagFace }) {
     }
   }
 
+  const openConfig = async () => {
+    setConfigError(null)
+    setConfigOpen(true)
+    try {
+      const current = await face.getSettings()
+      setConfigDraft({
+        platformLabel: current.platformLabel,
+        apiOrigin: current.apiOrigin,
+        authOrigin: current.authOrigin,
+        username: current.username,
+        password: current.password,
+      })
+    } catch (reason: unknown) {
+      setConfigError(reason instanceof Error ? reason.message : String(reason))
+    }
+  }
+
+  const saveConfig = async () => {
+    if (configSaving) return
+    setConfigSaving(true)
+    setConfigError(null)
+    try {
+      await face.saveSettings({
+        platformLabel: configDraft.platformLabel.trim(),
+        apiOrigin: configDraft.apiOrigin.trim(),
+        authOrigin: configDraft.authOrigin.trim(),
+        username: configDraft.username.trim(),
+        password: configDraft.password,
+      })
+      setConfigOpen(false)
+      setPlatform(null)
+      void face.getPlatformInfo().then(setPlatform).catch(() => undefined)
+      await runQuery(1, 'page')
+    } catch (reason: unknown) {
+      setConfigError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setConfigSaving(false)
+    }
+  }
+
   const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / RAG_PAGE_SIZE))
   const docTotalPages = Math.max(1, Math.ceil((docs?.total ?? 0) / DOC_PAGE_SIZE))
   const chunkTotalPages = Math.max(1, Math.ceil((chunks?.total ?? 0) / CHUNK_PAGE_SIZE))
@@ -752,7 +796,10 @@ function RagTab({ face }: { face: AiopsRagFace }) {
           />
           <Btn primary disabled={querying} onClick={() => { void runQuery(1) }}>{querying ? '查询中…' : '查询'}</Btn>
           <Btn disabled={saving} onClick={() => { void openCreate() }}>创建知识库</Btn>
-          <span style={{ marginLeft: 'auto', fontSize: 12, color: V.text3 }}>已对接：{platform?.label ?? '…'}</span>
+          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: V.text3 }}>
+            已对接：{platform?.label ?? '…'}
+            <Btn onClick={() => { void openConfig() }}>平台配置</Btn>
+          </span>
         </div>
         {error !== null && <div style={{ fontSize: 12.5, color: V.error, marginBottom: 10 }}>{error}</div>}
         {data === undefined && error === null && <div style={{ fontSize: 12.5, color: V.text3 }}>加载中…</div>}
@@ -997,6 +1044,65 @@ function RagTab({ face }: { face: AiopsRagFace }) {
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <Btn onClick={() => { setCreating(false) }}>取消</Btn>
               <Btn primary disabled={saving} onClick={() => { void submitCreate() }}>{saving ? '创建中…' : '创建'}</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {configOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,17,21,.45)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
+          <div style={{ ...card, width: 440, padding: '16px 18px', display: 'grid', gap: 10, boxShadow: '0 12px 40px rgba(0,0,0,.28)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: V.text }}>平台配置</div>
+            <div style={{ fontSize: 12, color: V.text3, lineHeight: 1.7 }}>
+              RAG 知识库平台的对接参数。更换平台或迁移部署时修改；保存后即时生效（自动重新登录）。切换为非 KBMatrix 平台（如 RAGFlow）需配套对应适配包。
+            </div>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>平台名称（展示用）</span>
+              <input
+                value={configDraft.platformLabel}
+                onChange={(e) => { setConfigDraft({ ...configDraft, platformLabel: e.target.value }) }}
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text }}
+              />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>API 地址（data-infra）</span>
+              <input
+                value={configDraft.apiOrigin}
+                onChange={(e) => { setConfigDraft({ ...configDraft, apiOrigin: e.target.value }) }}
+                placeholder="http://192.168.32.14:6061"
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text, fontFamily: V.mono }}
+              />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>认证地址（web 前门）</span>
+              <input
+                value={configDraft.authOrigin}
+                onChange={(e) => { setConfigDraft({ ...configDraft, authOrigin: e.target.value }) }}
+                placeholder="http://192.168.32.14:6060"
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text, fontFamily: V.mono }}
+              />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>账号</span>
+              <input
+                value={configDraft.username}
+                onChange={(e) => { setConfigDraft({ ...configDraft, username: e.target.value }) }}
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text }}
+              />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: V.text3 }}>口令</span>
+              <input
+                type="password"
+                value={configDraft.password}
+                onChange={(e) => { setConfigDraft({ ...configDraft, password: e.target.value }) }}
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${V.border}`, fontSize: 12.5, background: 'transparent', color: V.text }}
+              />
+            </label>
+            {configError !== null && <div style={{ fontSize: 12.5, color: V.error }}>{configError}</div>}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Btn onClick={() => { setConfigOpen(false) }}>取消</Btn>
+              <Btn primary disabled={configSaving} onClick={() => { void saveConfig() }}>{configSaving ? '保存中…' : '保存'}</Btn>
             </div>
           </div>
         </div>

@@ -176,8 +176,18 @@ export interface AiopsRagChunkUpdateInput {
   readonly content: string
 }
 
-/** Console-editable RAG settings (persisted beside the DSH user root). */
+/** Console-editable RAG settings (persisted beside the DSH user root; wins over the plugin Config). */
 export interface AiopsRagSettings {
   /** 知识召回注入推理链路：关闭后 knowledge_search 工具拒绝召回。 */
   readonly recallEnabled: boolean
+  /** 对接平台展示名（控制台「已对接」标识）。 */
+  readonly platformLabel: string
+  /** data-infra API 地址，如 http://192.168.32.14:6061。 */
+  readonly apiOrigin: string
+  /** 平台 web 前门地址（签发令牌），如 http://192.168.32.14:6060。 */
+  readonly authOrigin: string
+  /** 平台账号。 */
+  readonly username: string
+  /** 平台口令。 */
+  readonly password: string
 }

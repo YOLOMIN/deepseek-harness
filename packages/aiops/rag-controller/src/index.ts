@@ -109,6 +109,11 @@ const updateChunkSchema = zod.object({
 
 const settingsInputSchema = zod.object({
   recallEnabled: zod.boolean().optional(),
+  platformLabel: zod.string().trim().min(1, '平台名称不能为空').max(50).optional(),
+  apiOrigin: zod.string().regex(/^https?:\/\/\S+$/u, 'API 地址必须是 http(s) URL').optional(),
+  authOrigin: zod.string().regex(/^https?:\/\/\S+$/u, '认证地址必须是 http(s) URL').optional(),
+  username: zod.string().optional(),
+  password: zod.string().optional(),
 })
 
 const searchSchema = zod.object({
@@ -449,8 +454,9 @@ export class AiopsRagController extends TypertRemoteService {
    * @returns the configured label and origin.
    */
   @Remote('getPlatformInfo')
-  getPlatformInfo(): Promise<{ readonly label: string; readonly apiOrigin: string }> {
-    return Promise.resolve({ label: this.config.platformLabel, apiOrigin: this.config.apiOrigin })
+  async getPlatformInfo(): Promise<{ readonly label: string; readonly apiOrigin: string }> {
+    const settings = await this.effectiveSettings()
+    return { label: settings.platformLabel, apiOrigin: settings.apiOrigin }
   }
 
   /**
@@ -484,49 +490,76 @@ export class AiopsRagController extends TypertRemoteService {
   }
 
   /**
-   * Read the console-saved recall settings (recall switch); missing file means defaults.
-   * @returns the effective recall settings.
+   * Read the effective settings: console-saved override file wins over the plugin Config.
+   * @returns the merged recall + platform-connection settings.
    */
   @Remote('getSettings')
   async getSettings(): Promise<AiopsRagSettings> {
-    return this.readSettings()
+    return this.effectiveSettings()
   }
 
   /**
-   * Persist one recall-settings patch.
+   * Persist one settings patch; connection-field changes drop the cached
+   * platform token so the next call re-logs in against the new endpoint.
    * @param input - the fields to change.
-   * @returns the saved settings.
+   * @returns the saved effective settings.
    */
   @Remote('saveSettings')
-  async saveSettings(input: { readonly recallEnabled?: boolean | undefined }): Promise<AiopsRagSettings> {
+  async saveSettings(input: Partial<AiopsRagSettings>): Promise<AiopsRagSettings> {
     const parsed = settingsInputSchema.safeParse(input)
-    if (!parsed.success) throw invalid('input', '设置无效')
-    const current = await this.readSettings()
+    if (!parsed.success) throw invalid('input', parsed.error.issues[0]?.message ?? '设置无效')
+    const current = await this.effectiveSettings()
     const next: AiopsRagSettings = {
       recallEnabled: parsed.data.recallEnabled ?? current.recallEnabled,
+      platformLabel: parsed.data.platformLabel ?? current.platformLabel,
+      apiOrigin: parsed.data.apiOrigin ?? current.apiOrigin,
+      authOrigin: parsed.data.authOrigin ?? current.authOrigin,
+      username: parsed.data.username ?? current.username,
+      password: parsed.data.password ?? current.password,
     }
     await mkdir(dirname(this.config.settingsPath), { recursive: true })
     await writeFile(this.config.settingsPath, JSON.stringify(next, null, 2), 'utf8')
+    // 连接字段变化：作废缓存令牌，下一次调用重新登录
+    if (parsed.data.apiOrigin !== undefined || parsed.data.authOrigin !== undefined
+      || parsed.data.username !== undefined || parsed.data.password !== undefined) {
+      this.token = undefined
+    }
     return next
   }
 
-  /** Read the persisted recall settings, defaulting to enabled. */
-  private async readSettings(): Promise<AiopsRagSettings> {
+  /** Read the persisted override and merge it over the plugin Config. */
+  private async effectiveSettings(): Promise<AiopsRagSettings> {
     let raw: string | undefined
     try {
       raw = await readFile(this.config.settingsPath, 'utf8')
     } catch {
-      // 设置文件缺失或不可读时按默认（召回开启）
+      // 覆盖文件缺失或不可读时回退插件配置
     }
     if (raw !== undefined) {
       try {
         const parsed = settingsInputSchema.safeParse(JSON.parse(raw))
-        if (parsed.success) return { recallEnabled: parsed.data.recallEnabled ?? true }
+        if (parsed.success) {
+          return {
+            recallEnabled: parsed.data.recallEnabled ?? true,
+            platformLabel: parsed.data.platformLabel ?? this.config.platformLabel,
+            apiOrigin: parsed.data.apiOrigin ?? this.config.apiOrigin,
+            authOrigin: parsed.data.authOrigin ?? this.config.authOrigin,
+            username: parsed.data.username ?? this.config.username,
+            password: parsed.data.password ?? this.config.password,
+          }
+        }
       } catch {
         // JSON 损坏等价于无覆盖
       }
     }
-    return { recallEnabled: true }
+    return {
+      recallEnabled: true,
+      platformLabel: this.config.platformLabel,
+      apiOrigin: this.config.apiOrigin,
+      authOrigin: this.config.authOrigin,
+      username: this.config.username,
+      password: this.config.password,
+    }
   }
 
   /**
@@ -537,7 +570,7 @@ export class AiopsRagController extends TypertRemoteService {
    * @returns hits with the switch state; disabled yields an empty list.
    */
   async recallKnowledge(query: string, topK: number): Promise<{ readonly enabled: boolean; readonly hits: readonly AiopsRagSearchHit[] }> {
-    const settings = await this.readSettings()
+    const settings = await this.effectiveSettings()
     if (!settings.recallEnabled) return { enabled: false, hits: [] }
     const bases = await this.listBases({ page: 1, pageSize: 200 })
     if (bases.rows.length === 0) return { enabled: true, hits: [] }
@@ -581,6 +614,7 @@ export class AiopsRagController extends TypertRemoteService {
 
   /** One platform call with the current token. */
   private async callOnce(method: 'GET' | 'POST', path: string, body: unknown, timeoutMs?: number): Promise<PlatformEnvelope> {
+    const settings = await this.effectiveSettings()
     const headers: Record<string, string> = { Authorization: `Bearer ${this.token ?? ''}` }
     let payload: string | FormData | undefined
     if (body instanceof FormData) {
@@ -591,7 +625,7 @@ export class AiopsRagController extends TypertRemoteService {
     }
     let response: Response
     try {
-      response = await fetch(`${this.config.apiOrigin}${path}`, {
+      response = await fetch(`${settings.apiOrigin}${path}`, {
         method,
         headers,
         body: payload ?? null,
@@ -623,12 +657,13 @@ export class AiopsRagController extends TypertRemoteService {
 
   /** Login through the web front and cache the access token. */
   private async login(): Promise<void> {
+    const settings = await this.effectiveSettings()
     let response: Response
     try {
-      response = await fetch(`${this.config.authOrigin}/kb-matrix-base/v1/auth/login-local`, {
+      response = await fetch(`${settings.authOrigin}/kb-matrix-base/v1/auth/login-local`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
-        body: JSON.stringify({ username: this.config.username, password: this.config.password }),
+        body: JSON.stringify({ username: settings.username, password: settings.password }),
         signal: AbortSignal.timeout(this.config.requestTimeoutMs),
       })
     } catch (error: unknown) {

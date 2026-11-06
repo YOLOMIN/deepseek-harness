@@ -28,7 +28,7 @@ export interface AiopsRagFace {
   /** Read the recall settings. */
   getSettings: () => Promise<AiopsRagSettings>
   /** Persist one recall-settings patch. */
-  saveSettings: (input: { readonly recallEnabled?: boolean | undefined }) => Promise<AiopsRagSettings>
+  saveSettings: (input: Partial<AiopsRagSettings>) => Promise<AiopsRagSettings>
   /** Delete knowledge bases by id batch. */
   deleteBase: (ids: readonly string[]) => Promise<void>
   /** Page documents of one knowledge base. */
