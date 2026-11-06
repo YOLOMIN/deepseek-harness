@@ -369,15 +369,67 @@ export class AiopsRagController extends TypertRemoteService {
     const hybrid = await this.trySearch(() => request('hybrid', parsed.data.kbIds))
     if (hybrid !== undefined && hybrid.length > 0) return hybrid.map(hit => mapHit(hit))
     const keyword = await this.trySearch(() => request('keyword', parsed.data.kbIds))
-    if (keyword !== undefined) return keyword.map(hit => mapHit(hit))
+    if (keyword !== undefined && keyword.length > 0) return keyword.map(hit => mapHit(hit))
     const merged: AiopsRagSearchHit[] = []
     for (const id of parsed.data.kbIds) {
       const single = await this.trySearch(() => request('keyword', [id]))
       if (single !== undefined) merged.push(...single.map(hit => mapHit(hit)))
     }
-    return merged
-      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-      .slice(0, topK)
+    if (merged.length > 0) {
+      return merged
+        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+        .slice(0, topK)
+    }
+    // 平台检索全空（中文 keyword 分词不命中 + 向量侧未生效）时的本地降级：
+    // 拉取分块做子串包含匹配，保证中文知识可召回；仅兜底路径，量级小。
+    return this.localSearch(parsed.data.kbIds, parsed.data.text, topK)
+  }
+
+  /**
+   * Local fallback retrieval: page every document's chunks of the given bases
+   * and substring-match the query terms (ASCII words lowercased, CJK runs
+   * split into bigrams). Used only when every platform search mode is empty.
+   * @param kbIds - knowledge bases in scope.
+   * @param text - the query text.
+   * @param topK - hit cap.
+   * @returns matched chunks as hits, best coverage first.
+   */
+  private async localSearch(kbIds: readonly string[], text: string, topK: number): Promise<readonly AiopsRagSearchHit[]> {
+    const terms = tokenizeQuery(text)
+    if (terms.length === 0) return []
+    const hits: AiopsRagSearchHit[] = []
+    for (const kbId of kbIds) {
+      const docs = await this.trySearch(async () => {
+        const envelope = await this.callPlatform('GET', `${API_PREFIX}/kb-document/page?current=1&size=50&kb_id=${encodeURIComponent(kbId)}`)
+        const page = (envelope.data as PlatformPageEnvelope<PlatformDocumentEntry> | undefined) ?? {}
+        return (page.data ?? []) as unknown as ReadonlyArray<Record<string, unknown>>
+      })
+      for (const doc of docs ?? []) {
+        const docId = typeof doc.id === 'string' ? doc.id : ''
+        const docName = typeof doc.name === 'string' ? doc.name : ''
+        if (docId === '') continue
+        const chunks = await this.trySearch(async () => {
+          const envelope = await this.callPlatform('POST', `${API_PREFIX}/kb-document/chunk/page`, {
+            current: 1, size: 100, kb_id: kbId, document_id: docId,
+          })
+          const page = (envelope.data as PlatformPageEnvelope<PlatformChunkEntry> | undefined) ?? {}
+          return (page.data ?? []) as unknown as ReadonlyArray<Record<string, unknown>>
+        })
+        for (const chunk of chunks ?? []) {
+          const content = typeof chunk.content === 'string' ? chunk.content : ''
+          const haystack = content.toLowerCase()
+          const matched = terms.filter(term => haystack.includes(term)).length
+          if (matched === 0) continue
+          hits.push({
+            content,
+            score: matched / terms.length,
+            documentName: docName,
+            chunkId: typeof chunk.id === 'string' ? chunk.id : undefined,
+          })
+        }
+      }
+    }
+    return hits.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, topK)
   }
 
   /** Run one search variant; platform business failures degrade to undefined for the fallback chain. */
@@ -588,6 +640,25 @@ export class AiopsRagController extends TypertRemoteService {
     if (token === undefined || token === '') throw authFailed()
     this.token = token
   }
+}
+
+/** Split a query into matchable terms: ASCII/数字 words lowercased; CJK 连续段切二元组（单字噪声大，丢弃）。 */
+function tokenizeQuery(text: string): readonly string[] {
+  const terms: string[] = []
+  const lower = text.toLowerCase()
+  for (const piece of lower.split(/[\s,，。？?、;；:：!！()（）\[\]【】"'“”]+/u)) {
+    if (piece === '') continue
+    if (/^[a-z0-9_.-]+$/u.test(piece)) {
+      if (piece.length >= 2) terms.push(piece)
+      continue
+    }
+    // CJK 连续段：切二元组
+    if (piece.length === 1) continue
+    for (let i = 0; i < piece.length - 1; i++) {
+      terms.push(piece.slice(i, i + 2))
+    }
+  }
+  return [...new Set(terms)]
 }
 
 /** Map one platform base entry to a wire row. */

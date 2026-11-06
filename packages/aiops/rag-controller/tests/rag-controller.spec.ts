@@ -362,3 +362,35 @@ describe('AiopsRagController.searchKb resilience', () => {
     expect(hits[0]?.content).toContain('命中-kb-')
   })
 })
+
+describe('AiopsRagController.searchKb local fallback', () => {
+  it('falls back to local chunk substring matching when every platform mode is empty', async () => {
+    const { controller } = fixture()
+    stubFetch((url) => {
+      if (url.includes('/auth/login-local')) return LOGIN_ANSWER
+      if (url.includes('/kb-document/page')) {
+        return { json: { code: '200', data: { current: 1, total: 1, data: [{ id: 'doc-1', name: '处置手册.md' }] } } }
+      }
+      if (url.includes('/chunk/page')) {
+        return {
+          json: {
+            code: '200',
+            data: {
+              current: 1,
+              total: 2,
+              data: [
+                { id: 'c-1', title: '', content: 'GPU 温度持续超过 85℃ 时先确认机房制冷与风扇转速' },
+                { id: 'c-2', title: '', content: '队列阻塞先看调度器日志' },
+              ],
+            },
+          },
+        }
+      }
+      return { json: { code: '200', data: [] } }
+    })
+    const hits = await controller.searchKb({ kbIds: ['kb-1'], text: 'GPU 温度过高怎么处置' })
+    expect(hits).toHaveLength(1)
+    expect(hits[0]?.documentName).toBe('处置手册.md')
+    expect(hits[0]?.content).toContain('85℃')
+  })
+})
