@@ -243,6 +243,8 @@
     { "path": "./packages/aiops/skill-controller" },
     { "path": "./packages/aiops/mcp-controller" },
     { "path": "./packages/aiops/rag-controller" },
+    { "path": "./packages/platform/relay" },
+    { "path": "./packages/client/ui-settings-account" },
     { "path": "./packages/experimental/client-ui-cot-translation/tsconfig.host.json" },
     { "path": "./packages/experimental/cot-translation-bundle" },
     { "path": "./packages/experimental/session-search" },

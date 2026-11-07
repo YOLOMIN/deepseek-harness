@@ -10,7 +10,7 @@ import type { SessionPersistence, SessionPersistenceSnapshot } from '@deepseek-a
 import { SessionPersistenceRevision } from '@deepseek-ai/dsh-session-persistence'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import AgentPresets from '@deepseek-ai/dsh-agent-preset-registry'
-import AiopsAgentController from '../src/index.ts'
+import AiopsAgentController, { DEFAULT_SEED_AGENTS } from '../src/index.ts'
 import { composeAgentPreset } from '../src/preset.ts'
 import type { AgentDefinition } from '../src/store.ts'
 
@@ -68,7 +68,7 @@ async function fixture(options: {
     storePath,
     templatePresetId: 'os-agent',
     templateWaitMs: 500,
-    ...(options.seed === true ? {} : { seedAgentsJson: options.seedAgentsJson ?? '[]' }),
+    seedAgentsJson: options.seedAgentsJson ?? (options.seed === true ? JSON.stringify(DEFAULT_SEED_AGENTS) : '[]'),
   })
   await plugin
   return { ctx, storePath, plugin }

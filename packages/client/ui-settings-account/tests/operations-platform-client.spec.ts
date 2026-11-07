@@ -18,8 +18,8 @@ it('uses the selected adapter for login, ticket exchange, and health checks', as
   await expect(operationsTicketLogin(platform, 'one-time')).resolves.toMatchObject({ status: 0, username: 'operator', role: 1 })
   await expect(operationsHealth(platform)).resolves.toBe(true)
   expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([platform.loginUrl, platform.ticketLoginUrl, platform.healthUrl])
-  expect(fetchMock.mock.calls[0]![1].body).toBe(JSON.stringify({ username: 'operator', password: 'secret' }))
-  expect(fetchMock.mock.calls[1]![1].body).toBe(JSON.stringify({ ticket: 'one-time' }))
+  expect(fetchMock.mock.calls[0]![1]!.body).toBe(JSON.stringify({ username: 'operator', password: 'secret' }))
+  expect(fetchMock.mock.calls[1]![1]!.body).toBe(JSON.stringify({ ticket: 'one-time' }))
 })
 
 it('sanitizes adapter responses and does not contact an absent health endpoint', async () => {

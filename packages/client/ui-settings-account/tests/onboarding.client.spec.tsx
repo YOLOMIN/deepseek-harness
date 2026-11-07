@@ -2,6 +2,8 @@
 /** The credential onboarding step owns login until dismissal or completion. */
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
+import type { ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
+import { DEFAULT_OPERATIONS_PLATFORMS, type OperationsPlatformsFormValue } from '../src/operations-platform.ts'
 import type { GlobalStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ThemeSnapshot } from '@deepseek-ai/dsh-client-ui-theme/client'
 import { AccountOnboarding } from '../src/client/AccountOnboarding.tsx'
@@ -24,16 +26,22 @@ it('claims onboarding while loading, offers API key fallback, and completes afte
     useSessionRetainInfo: unused, useResource: unused, useWorkspaces: unused,
     ...allowAllAccess,
   }
+  const platformsSnapshot: ConfigFormSnapshot<OperationsPlatformsFormValue> = {
+    status: 'ready', base: undefined, user: undefined, revision: 1, writable: true,
+    value: { operationsPlatformsJson: JSON.stringify(DEFAULT_OPERATIONS_PLATFORMS), defaultPlatformId: 'scmms' },
+  }
   const props = {
     ...globals,
     hasRunningAccountTasks: vi.fn(async () => false),
     complete: vi.fn(), useApiKey: vi.fn(), setOnboarding: vi.fn(), showLogin: vi.fn(),
     useAccount: <T,>(select: (snapshot: AccountSnapshot) => T) => select(account),
     useTheme: <T,>(select: (snapshot: ThemeSnapshot) => T) => select(theme),
+    usePlatforms: <T,>(select: (value: ConfigFormSnapshot<OperationsPlatformsFormValue>) => T) => select(platformsSnapshot),
     start: vi.fn(async () => {}), cancel: vi.fn(async () => {}), signOut: vi.fn(async () => {}),
     contactUs: vi.fn(), t: makeTranslate(en),
     refreshAccount: vi.fn(async () => {}), bonusNoticeShown: vi.fn(), bonusNoticeDismissed: vi.fn(),
     avatarFailed: vi.fn(),
+    savePlatforms: vi.fn(async () => true),
   }
   const view = render(<AccountOnboarding {...props} />)
   expect(props.setOnboarding).toHaveBeenCalledExactlyOnceWith(true)

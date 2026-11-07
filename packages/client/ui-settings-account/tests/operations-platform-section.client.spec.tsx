@@ -6,8 +6,14 @@ import { DEFAULT_OPERATIONS_PLATFORMS, type OperationsPlatformsConfig } from '..
 import type { AccountSectionInjected } from '../src/client/AccountSection.tsx'
 import { OperationsPlatformSection } from '../src/client/OperationsPlatformSection.tsx'
 import { en, type AccountKey } from '../src/client/locales.ts'
+import type { ThemeSnapshot } from '@deepseek-ai/dsh-client-ui-theme/client'
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+
+const themeSnapshot = {
+  preference: 'light', fontSizes: { text: 14, code: 11, terminal: 13 }, fontFamilies: { text: '', code: '', terminal: '' },
+  active: { id: 'light', colorScheme: 'light', tokens: {} }, themes: [], revision: 0,
+} as ThemeSnapshot
 
 function mount(
   value: OperationsPlatformsConfig,
@@ -16,17 +22,29 @@ function mount(
   const operations = {
     savePlatforms,
     hooks: {
+      account: {
+        getSnapshot: () => ({ view: undefined, details: undefined, avatar: undefined, failed: false }),
+        subscribe: () => () => {},
+      },
+      theme: { getSnapshot: () => themeSnapshot, subscribe: () => () => {} },
       platforms: {
         getSnapshot: () => ({
-          status: 'ready', base: undefined, user: undefined, revision: 1, writable: true,
+          status: 'ready' as const, base: undefined, user: undefined, revision: 1, writable: true,
           value: { operationsPlatformsJson: JSON.stringify(value.operationsPlatforms), defaultPlatformId: value.defaultPlatformId },
         }),
         subscribe: () => () => {},
       },
     },
+    refreshAccount: vi.fn(async () => {}),
+    contactUs: vi.fn(), showLogin: vi.fn(), setOnboarding: vi.fn(),
+    bonusNoticeShown: vi.fn(), bonusNoticeDismissed: vi.fn(),
+    avatarFailed: vi.fn(), hasRunningAccountTasks: vi.fn(async () => false),
+    start: vi.fn(async () => {}), cancel: vi.fn(async () => {}), signOut: vi.fn(async () => {}),
   } as AccountSectionInjected
   render(<OperationsPlatformSection {...({} as GlobalStandardProps)} {...operations}
-    usePlatforms={selector => selector(operations.hooks.platforms.getSnapshot())} t={key => en[key as AccountKey]} />)
+    useAccount={selector => selector(operations.hooks.account.getSnapshot())}
+    useTheme={selector => selector(operations.hooks.theme.getSnapshot())}
+    usePlatforms={selector => selector(operations.hooks.platforms.getSnapshot())} t={key => en[key as AccountKey]} close={() => {}} />)
   return { savePlatforms }
 }
 

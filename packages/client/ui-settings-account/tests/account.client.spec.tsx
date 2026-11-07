@@ -14,6 +14,8 @@ import type { AccountMenuProps } from '../src/client/AccountMenu.tsx'
 import type {} from '../src/client/index.ts'
 import { en, zh, type AccountKey } from '../src/client/locales.ts'
 import { DEFAULT_OPERATIONS_PLATFORMS, OperationsPlatformsConfig } from '../src/operations-platform.ts'
+import type { OperationsPlatformsFormValue } from '../src/operations-platform.ts'
+import type { ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import css from '../src/client/AccountSection.module.css'
 import type { AccountAvatarSnapshot } from '../src/client/account-avatar.ts'
 
@@ -639,7 +641,9 @@ it('opens the authorization link with the active application palette and follows
   const operations = operationsOf({ status: 'signed-out', attempt: { id: 'attempt' as SignInAttemptId, phase: 'waiting-browser', authorizeUrl } })
   const element = (theme: ThemeSnapshot) => <AccountSection {...({} as GlobalStandardProps)} {...operations}
     useAccount={selector => selector(operations.hooks.account.getSnapshot())}
-    useTheme={selector => selector(theme)} close={() => {}} t={key => key in en ? en[key as AccountKey] : key} />
+    useTheme={selector => selector(theme)}
+    usePlatforms={selector => selector(operations.hooks.platforms.getSnapshot())}
+    close={() => {}} t={key => key in en ? en[key as AccountKey] : key} />
   const view = render(element(themeOf('dark')))
   expect(screen.getByRole('link', { name: en.open }).getAttribute('href'))
     .toBe('https://platform.deepseek.com/dsh/authorize?state=example&theme=dark')
@@ -689,7 +693,10 @@ it('reports a rejected settings login and disables login while initial state is 
   const props = { ...({} as GlobalStandardProps), ...operations,
     start: vi.fn(async () => { throw new Error('unavailable') }),
     useAccount: <T,>(select: (value: AccountSnapshot) => T) => select(snapshot),
-    useTheme: <T,>(select: (value: ThemeSnapshot) => T) => select(operations.hooks.theme.getSnapshot()), close: () => {},
+    useTheme: <T,>(select: (value: ThemeSnapshot) => T) => select(operations.hooks.theme.getSnapshot()),
+    usePlatforms: <T,>(select: (value: ConfigFormSnapshot<OperationsPlatformsFormValue>) => T) =>
+      select(operations.hooks.platforms.getSnapshot()),
+    close: () => {},
     t: (key: string) => en[key as AccountKey],
   }
   const view = render(<AccountSection {...props} />)

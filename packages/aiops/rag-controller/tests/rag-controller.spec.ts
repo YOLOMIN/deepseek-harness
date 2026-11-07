@@ -17,6 +17,7 @@ function fixture() {
     requestTimeoutMs: 5000,
     uploadTimeoutMs: 20000,
     platformLabel: 'KBMatrix 知识库平台',
+    similarityThreshold: 0.4,
     settingsPath: resolve(dir, 'settings.json'),
   }
   const controller = new AiopsRagController(ctx, config)

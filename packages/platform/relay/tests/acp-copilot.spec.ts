@@ -48,6 +48,7 @@ function createHarness(options: { permission?: CopilotPermission } = {}): Harnes
     dshRoot: '/dsh',
     sessionCwd: '/work',
     patchPath: 'persona.patch.yml',
+    sandboxMode: 'read-only',
     permission: options.permission ?? 'allow',
     resolveApiKey: () => Promise.resolve('test-key'),
     spawnChild: (env) => {
@@ -96,7 +97,7 @@ function createHarness(options: { permission?: CopilotPermission } = {}): Harnes
           { sessionUpdate: 'tool_call', toolCallId: 'tc-1', title: 'Shell', kind: 'execute', status: 'in_progress' },
           { sessionUpdate: 'tool_call_update', toolCallId: 'tc-1', status: 'completed' },
           { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '诊断结论' } },
-          { sessionUpdate: 'usage', used: 10, size: 100 },
+          { sessionUpdate: 'usage_update', used: 10, size: 100 },
         ]
         for (const update of updates) {
           await server().client.notify(methods.client.session.update, { sessionId: params.sessionId, update })
@@ -139,7 +140,7 @@ describe('sessionUpdateToSse', () => {
 
   it('ignores variants and content the frontend does not consume', () => {
     expect(sessionUpdateToSse({ sessionUpdate: 'tool_call_update', toolCallId: 't1', status: 'in_progress' })).toBeUndefined()
-    expect(sessionUpdateToSse({ sessionUpdate: 'usage', used: 1, size: 2 })).toBeUndefined()
+    expect(sessionUpdateToSse({ sessionUpdate: 'usage_update', used: 1, size: 2 })).toBeUndefined()
     expect(sessionUpdateToSse({ sessionUpdate: 'agent_message_chunk', content: { type: 'image', data: 'x', mimeType: 'image/png' } })).toBeUndefined()
   })
 })

@@ -30,7 +30,7 @@ export type { AgentDefinition } from './store.ts'
 export type * from './types.ts'
 
 /** Default agent seeded on first boot, per the GAC2 requirements document. */
-const DEFAULT_SEED_AGENTS: ReadonlyArray<Omit<AgentDefinition, 'createdAt' | 'updatedAt'>> = [
+export const DEFAULT_SEED_AGENTS: ReadonlyArray<Omit<AgentDefinition, 'createdAt' | 'updatedAt'>> = [
   {
     id: 'ops-agent',
     name: '运维智能体',

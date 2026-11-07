@@ -10,6 +10,7 @@ import { SlotTestRuntime, stubConfigForm, usePinnedBrowserLanguages } from '@dee
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import type { SessionLiveEventEntry, SessionReference } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId, SessionSeq } from '@deepseek-ai/dsh-session/types'
+import { DEFAULT_OPERATIONS_PLATFORMS } from '../src/operations-platform.ts'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
 import type { ThemeSnapshot } from '@deepseek-ai/dsh-client-ui-theme/client'
@@ -61,8 +62,16 @@ function sectionOperations(account: AccountSnapshot, pages: PlatformPages): Acco
     hooks: {
       account: { getSnapshot: () => account, subscribe: () => () => {} },
       theme: { getSnapshot: () => theme, subscribe: () => () => {} },
+      platforms: {
+        getSnapshot: () => ({
+          status: 'ready' as const, base: undefined, user: undefined, revision: 1, writable: true,
+          value: { operationsPlatformsJson: JSON.stringify(DEFAULT_OPERATIONS_PLATFORMS), defaultPlatformId: 'scmms' },
+        }),
+        subscribe: () => () => {},
+      },
     },
     openPlatformPage: pages.open,
+    savePlatforms: async () => true,
     refreshAccount: async () => {},
     avatarFailed: () => {},
     bonusNoticeShown: () => {}, bonusNoticeDismissed: () => {},
